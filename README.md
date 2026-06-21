@@ -9,19 +9,23 @@ or another kind of place.
 
 ```powershell
 python -m pip install -e .
-living-folders .
+living-folders --execpath.folder .
 ```
 
 Inspect the same canonical portrait without opening a window:
 
 ```powershell
-living-folders . --inspect
+living-folders --execpath.folder . inspect
 ```
 
 Give an existing directory a starter constitution:
 
 ```powershell
-living-folders C:\some\folder --init
+living-folders --execpath.folder C:\some\folder init
 ```
+
+The window provides editable path navigation, back/up/refresh controls,
+presentation override, compact folder buttons, Explorer and shell escape
+hatches, and a draggable/resizable Directory Map presentation.
 
 The fuller orientation and manifest SoftSpec live in `docs/raw/`.

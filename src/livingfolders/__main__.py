@@ -1,47 +1,44 @@
-"""Command-line entrance to Living Folders."""
+"""lionscliapp entrance to Living Folders."""
 
-import argparse
 import json
-import sys
-from pathlib import Path
 
+import lionscliapp as app
+
+from . import __version__
 from .core import inspect_folder, write_manifest_template
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        prog="living-folders",
-        description="Let a directory present itself according to its purpose.",
-    )
-    parser.add_argument("folder", nargs="?", default=".")
-    parser.add_argument(
-        "--inspect",
-        action="store_true",
-        help="print the folder portrait as JSON instead of opening the GUI",
-    )
-    parser.add_argument(
-        "--init",
-        action="store_true",
-        help="write a starter .living-folder.json into the folder",
-    )
-    arguments = parser.parse_args()
+    app.reset()
+    app.declare_app("living-folders", __version__)
+    app.describe_app("Let ordinary directories present themselves as useful places.")
+    app.declare_projectdir(".living-folders")
+    app.declare_key("execpath.folder", ".")
+    app.describe_key("execpath.folder", "Folder to open, inspect, or initialize.")
 
-    try:
-        if arguments.init:
-            path = write_manifest_template(arguments.folder)
-            print(path)
-            return
+    app.declare_cmd("", cmd_open)
+    app.declare_cmd("open", cmd_open)
+    app.declare_cmd("inspect", cmd_inspect)
+    app.declare_cmd("init", cmd_init)
+    app.describe_cmd("", "Open the Living Folders control panel.")
+    app.describe_cmd("open", "Open the Living Folders control panel.")
+    app.describe_cmd("inspect", "Print the normalized folder model as JSON.")
+    app.describe_cmd("init", "Create a starter .living-folder.json.")
+    app.main()
 
-        if arguments.inspect:
-            portrait = inspect_folder(arguments.folder)
-            print(json.dumps(portrait, indent=2, ensure_ascii=False))
-            return
 
-        from .app import run
+def cmd_open():
+    from .app import run
 
-        run(Path(arguments.folder))
-    except ValueError as error:
-        parser.exit(2, f"living-folders: {error}\n")
+    run(app.ctx["execpath.folder"])
+
+
+def cmd_inspect():
+    print(json.dumps(inspect_folder(app.ctx["execpath.folder"]), indent=2))
+
+
+def cmd_init():
+    print(write_manifest_template(app.ctx["execpath.folder"]))
 
 
 if __name__ == "__main__":

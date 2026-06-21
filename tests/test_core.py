@@ -4,68 +4,83 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from livingfolders.core import inspect_folder, write_manifest_template
+from livingfolders.core import (
+    inspect_folder,
+    save_map_geometry,
+    save_presentation,
+    write_manifest_template,
+)
 
 
-class FolderPortraitTests(unittest.TestCase):
-    def test_project_root_is_inferred_and_python_is_runnable(self):
+class FolderModelTests(unittest.TestCase):
+    def test_project_root_is_inferred_and_python_is_detected(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
             (folder / ".git").mkdir()
-            (folder / "README.md").write_text("# hello\n", encoding="utf-8")
             (folder / "run.py").write_text("print('hello')\n", encoding="utf-8")
 
-            portrait = inspect_folder(folder)
+            model = inspect_folder(folder)
 
-            self.assertEqual("project-root", portrait["manifest"]["role"])
-            self.assertTrue(portrait["signals"]["is-git-repository"])
-            self.assertTrue(portrait["signals"]["has-readme"])
-            self.assertEqual(1, len(portrait["commands"]))
-            self.assertEqual(
-                [sys.executable, str(folder / "run.py")],
-                portrait["commands"][0]["command"],
-            )
+            self.assertEqual("project-root", model["inferred-presentation"])
+            self.assertEqual("project-root", model["active-presentation"])
+            self.assertIsNone(model["explicit-presentation"])
+            self.assertEqual([sys.executable, str(folder / "run.py")], model["detected-buttons"][0]["command"])
 
-    def test_manifest_is_normalized_into_one_interior_shape(self):
+    def test_explicit_presentation_overrides_inference(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
-            (folder / "launch").mkdir()
-            (folder / "go.cmd").write_text("@echo off\n", encoding="utf-8")
+            (folder / ".git").mkdir()
+            (folder / ".living-folder.json").write_text(
+                json.dumps({"presentation-mode": "directory-map"}),
+                encoding="utf-8",
+            )
+
+            model = inspect_folder(folder)
+
+            self.assertEqual("project-root", model["inferred-presentation"])
+            self.assertEqual("directory-map", model["active-presentation"])
+            self.assertEqual("directory-map", model["explicit-presentation"])
+
+    def test_navigation_and_command_buttons_are_normalized(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
             manifest = {
-                "title": "Print Queue",
-                "role": "factory",
-                "places": {"launch": "Waiting Jobs"},
-                "commands": {"go.cmd": "Run Queue"},
-                "actions": [{"label": "Status", "command": ["git", "status"]}],
+                "buttons": [
+                    {"kind": "navigate", "label": "Elsewhere", "target": ".."},
+                    {"kind": "command", "label": "Status", "command": "git status"},
+                ]
             }
             (folder / ".living-folder.json").write_text(
-                json.dumps(manifest), encoding="utf-8"
+                json.dumps(manifest),
+                encoding="utf-8",
             )
 
-            portrait = inspect_folder(folder)
+            buttons = inspect_folder(folder)["buttons"]
 
-            self.assertEqual("factory", portrait["manifest"]["role"])
-            self.assertEqual(
-                "Waiting Jobs",
-                portrait["manifest"]["places"]["launch"]["label"],
-            )
-            self.assertEqual("Run Queue", portrait["commands"][0]["label"])
-            self.assertEqual("Status", portrait["commands"][1]["label"])
+            self.assertEqual("navigate", buttons[0]["kind"])
+            self.assertEqual("..", buttons[0]["target"])
+            self.assertEqual("command", buttons[1]["kind"])
+            self.assertEqual("git status", buttons[1]["command"])
 
-    def test_init_writes_an_atomic_editable_constitution(self):
+    def test_writes_are_atomic_and_preserve_unknown_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
-
             path = write_manifest_template(folder)
             data = json.loads(path.read_text(encoding="utf-8"))
+            data["future-field"] = {"still": "here"}
+            path.write_text(json.dumps(data), encoding="utf-8")
 
-            self.assertEqual(".living-folder.json", path.name)
-            self.assertEqual("0.1", data["living-folder"])
-            self.assertIn("purpose", data)
+            save_presentation(folder, "directory-map")
+            save_map_geometry(
+                folder,
+                {"alpha.txt": {"x": 10, "y": 20, "width": 100, "height": 60}},
+            )
+            saved = json.loads(path.read_text(encoding="utf-8"))
+
+            self.assertEqual("0.2", saved["living-folder"])
+            self.assertEqual({"still": "here"}, saved["future-field"])
+            self.assertEqual("directory-map", saved["presentation-mode"])
             self.assertFalse(path.with_suffix(path.suffix + ".tmp").exists())
-
-            with self.assertRaises(ValueError):
-                write_manifest_template(folder)
 
 
 if __name__ == "__main__":

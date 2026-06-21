@@ -1,52 +1,68 @@
 {
   "document": {
-    "document-id": "living-folders.orientation.v0",
+    "document-id": "living-folders.orientation.v0.2",
     "title": "Living Folders Orientation",
     "tags": [
       "living-folders",
       "filesystem",
       "semantic-interface",
-      "orientation"
+      "cira",
+      "lionscliapp"
     ],
-    "purpose": "Orient humans and LLMs to the first working form of Living Folders."
+    "purpose": "Orient humans and LLMs to the control-panel and directory-map form of Living Folders.",
+    "type": {
+      "logical": {
+        "base": "file",
+        "format": "json",
+        "encoding": "utf-8"
+      },
+      "semantic": {
+        "base": "orientation"
+      }
+    },
+    "status": "working"
   },
   "keystone": [
     "A directory should be allowed to present itself according to its purpose.",
-    "The filesystem is already a database, a workspace, a map, and a control surface, but ordinary browsers mostly show it as a list."
+    "The folder remains the authority; Living Folders is a semantic and operational lens."
   ],
   "present-form": {
-    "identity": "A dependency-free Python and Tkinter semantic lens over one ordinary directory at a time.",
-    "boundary": "Living Folders does not import, relocate, own, or hide the user's files.",
-    "constitution": "A directory may describe itself through .living-folder.json. Two earlier names, .directory-role.json and .decorator.json, are also recognized.",
-    "portrait": [
-      "declared or inferred role",
-      "title, purpose, state, and mood",
-      "important subfolders presented as places",
-      "age and activity signals",
-      "detected runnable files and declared actions",
-      "raw files as a fallback material list"
+    "navigation": [
+      "editable current-path entry with Enter-to-navigate",
+      "invalid paths restore the actual current path",
+      "back, parent, refresh, and choose-folder controls",
+      "permanent Explorer and shell escape hatches"
     ],
-    "execution-safety": "Commands are visible but disabled until the user explicitly trusts runnable code in the open folder. Commands run with that directory as their current working directory."
+    "presentation": [
+      "a folder presentation is inferred when no override exists",
+      "the Presentation combobox may save an explicit override",
+      "Auto removes the override and returns authority to inference",
+      "Directory Map is a presentation alongside Project Root, Workbench, Factory, Library, Gallery, Inbox, Vault, Warehouse, Hallway, and Ruin"
+    ],
+    "folder-buttons": [
+      "declared navigation and command buttons are stored in .living-folder.json",
+      "navigation buttons do not require code trust",
+      "command buttons and detected runnable files remain disabled until the user explicitly trusts local code",
+      "the button editor adds, edits, and removes navigation or command buttons"
+    ],
+    "directory-map": [
+      "immediate directory contents appear as movable and resizable rectangles",
+      "folders are yellow, executables red, text blue, JSON light blue, images purple, and other files gray",
+      "double-click follows folders or asks the operating system to open files",
+      "committed geometry is stored by entry name in the folder constitution"
+    ]
   },
-  "interpretive-modes": {
-    "project-root": "Emphasize code areas, project signals, and local commands.",
-    "factory": "Emphasize inputs, outputs, stages, and production affordances.",
-    "gallery": "Emphasize visual material and browsing.",
-    "library": "Emphasize reference and retrieval.",
-    "ruin": "Emphasize age, warning, neglect, and historical truth.",
-    "workbench": "Emphasize active material, recency, and tools."
+  "architecture": {
+    "cli": "lionscliapp owns declaration, dispatch, persistent app configuration, and execpath.folder coercion.",
+    "world-model": "The filesystem plus .living-folder.json own durable folder reality.",
+    "discrete-engine": "Semantic events reduce into compact navigation, trust, selection, and committed map state, producing explicit effects.",
+    "continuity": "Tk pointer callbacks own in-progress map move and resize previews. Only release emits committed semantic meaning.",
+    "projection": "Tk widgets and canvas items are downstream renderings and do not decide semantic truth.",
+    "effects": "Folder reads, atomic JSON writes, process launches, and OS opening occur outside the reducer."
   },
   "commands": {
-    "open": "living-folders <folder>",
-    "inspect": "living-folders <folder> --inspect",
-    "create-constitution": "living-folders <folder> --init"
-  },
-  "design-discipline": [
-    "The filesystem remains authoritative.",
-    "External JSON is normalized once at the castle gate.",
-    "The GUI consumes one canonical folder portrait.",
-    "Observation is immediate; execution requires trust.",
-    "Unknown roles remain usable instead of being rejected.",
-    "The application should stay small enough to understand at a glance."
-  ]
+    "open": "living-folders --execpath.folder <folder>",
+    "inspect": "living-folders --execpath.folder <folder> inspect",
+    "initialize": "living-folders --execpath.folder <folder> init"
+  }
 }

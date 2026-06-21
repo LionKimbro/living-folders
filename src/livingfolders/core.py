@@ -1,288 +1,269 @@
-"""Read a directory at the castle gate and produce a trusted folder portrait."""
+"""Filesystem boundary and folder-local world model for Living Folders."""
 
 from __future__ import annotations
 
 import json
 import os
 import sys
-from datetime import datetime, timezone
+import uuid
 from pathlib import Path
 
 
-MANIFEST_NAMES = (
-    ".living-folder.json",
-    ".directory-role.json",
-    ".decorator.json",
-)
+MANIFEST_NAME = ".living-folder.json"
+MANIFEST_ALIASES = (MANIFEST_NAME, ".directory-role.json", ".decorator.json")
 
-RUNNABLE_SUFFIXES = {
-    ".bat": "batch",
-    ".cmd": "command",
-    ".com": "program",
-    ".exe": "program",
-    ".ps1": "powershell",
-    ".py": "python",
-}
-
-ROLE_VOCABULARY = {
-    "cockpit",
-    "factory",
-    "gallery",
-    "hallway",
-    "inbox",
-    "library",
+PRESENTATION_MODES = [
+    "directory-map",
     "project-root",
-    "ruin",
-    "staging-area",
+    "control-panel",
+    "workbench",
+    "factory",
+    "library",
+    "gallery",
+    "inbox",
     "vault",
     "warehouse",
-    "workbench",
+    "hallway",
+    "ruin",
+]
+
+RUNNABLE_SUFFIXES = {
+    ".bat",
+    ".cmd",
+    ".com",
+    ".exe",
+    ".ps1",
+    ".py",
+    ".sh",
+}
+
+TEXT_SUFFIXES = {
+    ".md",
+    ".rst",
+    ".txt",
+    ".log",
+    ".csv",
+    ".tsv",
 }
 
 
 def inspect_folder(path):
-    """Return the canonical portrait consumed by the GUI and JSON inspector."""
+    """Normalize one directory and its constitution into the trusted world shape."""
     folder = normalize_folder_path(path)
-    manifest_path, raw_manifest = read_manifest(folder)
-    manifest = normalize_manifest(raw_manifest, folder)
-    entries = read_entries(folder, manifest)
-    commands = find_commands(folder, manifest, entries)
-    signals = calculate_signals(folder, entries, manifest)
+    manifest_path, raw = read_manifest(folder)
+    entries = read_entries(folder)
+    inferred = infer_presentation(folder, entries)
+    explicit = normalize_optional_mode(raw.get("presentation-mode"))
+    buttons = normalize_buttons(raw)
+    geometry = normalize_map_geometry(raw)
 
     return {
         "folder": str(folder),
         "manifest-path": str(manifest_path) if manifest_path else None,
-        "manifest": manifest,
-        "signals": signals,
-        "commands": commands,
+        "raw-manifest": raw,
+        "title": str(raw.get("title", prettify_name(folder.name))),
+        "purpose": str(raw.get("purpose", infer_purpose(inferred))),
+        "role": normalize_mode(raw.get("role", inferred)),
+        "inferred-presentation": inferred,
+        "explicit-presentation": explicit,
+        "active-presentation": explicit or inferred,
+        "buttons": buttons,
+        "detected-buttons": detect_runnable_buttons(folder, entries, raw),
+        "map-geometry": geometry,
         "entries": entries,
     }
 
 
 def normalize_folder_path(path):
-    """Admit an external path only after it resolves to an existing directory."""
+    """Admit an external path only if it resolves to an existing directory."""
     folder = Path(path).expanduser().resolve()
-    if not folder.exists():
-        raise ValueError(f"Folder does not exist: {folder}")
-    if not folder.is_dir():
-        raise ValueError(f"Not a folder: {folder}")
+    if not folder.exists() or not folder.is_dir():
+        raise ValueError(f"Not a readable folder: {folder}")
     return folder
 
 
 def read_manifest(folder):
-    """Read the first recognized local constitution, if one is present."""
-    for name in MANIFEST_NAMES:
+    for name in MANIFEST_ALIASES:
         path = folder / name
         if not path.is_file():
             continue
-
         try:
             with path.open("r", encoding="utf-8") as handle:
                 data = json.load(handle)
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError(f"Cannot read {path.name}: {error}") from error
-
         if not isinstance(data, dict):
             raise ValueError(f"{path.name} must contain a JSON object.")
-
         return path, data
-
     return None, {}
 
 
-def normalize_manifest(raw, folder):
-    """Turn permissive external metadata into the one interior shape."""
-    role = normalize_role(raw.get("role", infer_role(folder)))
-    places = raw.get("places", {})
-    commands = raw.get("commands", {})
-    actions = raw.get("actions", [])
-
-    if not isinstance(places, dict):
-        raise ValueError("manifest.places must be an object.")
-    if not isinstance(commands, dict):
-        raise ValueError("manifest.commands must be an object.")
-    if not isinstance(actions, list):
-        raise ValueError("manifest.actions must be an array.")
-
-    return {
-        "living-folder": str(raw.get("living-folder", "0.1")),
-        "title": str(raw.get("title", prettify_name(folder.name))),
-        "role": role,
-        "state": str(raw.get("state", infer_state(role))),
-        "presentation": str(raw.get("presentation", infer_presentation(role))),
-        "purpose": str(raw.get("purpose", infer_purpose(role))),
-        "mood": str(raw.get("mood", infer_mood(role))),
-        "warning": str(raw.get("warning", "")),
-        "places": normalize_places(places),
-        "commands": normalize_command_annotations(commands),
-        "actions": normalize_actions(actions),
-    }
-
-
-def normalize_role(value):
-    role = str(value).strip().lower().replace("_", "-").replace(" ", "-")
-    return role or "workbench"
-
-
-def normalize_places(raw):
-    places = {}
-    for name, value in raw.items():
-        if isinstance(value, str):
-            value = {"label": value}
-        if not isinstance(value, dict):
-            raise ValueError(f"manifest.places.{name} must be an object or string.")
-
-        places[str(name)] = {
-            "label": str(value.get("label", prettify_name(str(name)))),
-            "role": normalize_role(value.get("role", "hallway")),
-            "description": str(value.get("description", "")),
-            "importance": str(value.get("importance", "normal")),
-        }
-    return places
-
-
-def normalize_command_annotations(raw):
-    commands = {}
-    for name, value in raw.items():
-        if isinstance(value, str):
-            value = {"label": value}
-        if not isinstance(value, dict):
-            raise ValueError(f"manifest.commands.{name} must be an object or string.")
-
-        commands[str(name)] = {
-            "label": str(value.get("label", prettify_name(Path(str(name)).stem))),
-            "description": str(value.get("description", "")),
-            "importance": str(value.get("importance", "normal")),
-        }
-    return commands
-
-
-def normalize_actions(raw):
-    actions = []
-    for number, value in enumerate(raw, 1):
-        if not isinstance(value, dict):
-            raise ValueError(f"manifest.actions item {number} must be an object.")
-        if "command" not in value:
-            raise ValueError(f"manifest.actions item {number} needs a command.")
-
-        command = value["command"]
-        if not isinstance(command, (str, list)):
-            raise ValueError(f"manifest.actions item {number} command must be text or an array.")
-        if isinstance(command, list):
-            if not command:
-                raise ValueError(f"manifest.actions item {number} command cannot be empty.")
-            if not all(isinstance(part, str) for part in command):
-                raise ValueError(
-                    f"manifest.actions item {number} command array must contain only text."
-                )
-
-        actions.append(
-            {
-                "label": str(value.get("label", f"Action {number}")),
-                "description": str(value.get("description", "")),
-                "importance": str(value.get("importance", "normal")),
-                "command": command,
-            }
-        )
-    return actions
-
-
-def read_entries(folder, manifest):
-    """Read immediate children only; a portrait is orientation, not an indexer."""
+def read_entries(folder):
     entries = []
-    hidden_names = set(MANIFEST_NAMES) | {".git"}
-
+    hidden = set(MANIFEST_ALIASES) | {".git", ".living-folders"}
     try:
-        children = list(folder.iterdir())
+        paths = sorted(folder.iterdir(), key=lambda item: item.name.lower())
     except OSError as error:
         raise ValueError(f"Cannot read folder: {error}") from error
 
-    for path in children:
-        if path.name in hidden_names:
+    for path in paths:
+        if path.name in hidden:
             continue
-
         try:
-            stat = path.stat()
+            is_folder = path.is_dir()
+            size = None if is_folder else path.stat().st_size
         except OSError:
             continue
-
-        kind = "folder" if path.is_dir() else "file"
-        place = manifest["places"].get(path.name)
         entries.append(
             {
                 "name": path.name,
                 "path": str(path),
-                "kind": kind,
-                "size": stat.st_size if kind == "file" else None,
-                "modified": datetime.fromtimestamp(
-                    stat.st_mtime, tz=timezone.utc
-                ).isoformat(),
-                "age-days": max(
-                    0,
-                    int(
-                        (
-                            datetime.now(timezone.utc)
-                            - datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-                        ).total_seconds()
-                        // 86400
-                    ),
-                ),
-                "role": place["role"] if place else None,
-                "label": place["label"] if place else prettify_name(path.name),
-                "description": place["description"] if place else "",
-                "importance": place["importance"] if place else "normal",
+                "kind": "folder" if is_folder else "file",
+                "visual-kind": classify_entry(path, is_folder),
+                "size": size,
             }
         )
-
-    entries.sort(
-        key=lambda item: (
-            item["kind"] != "folder",
-            importance_rank(item["importance"]),
-            item["name"].lower(),
-        )
-    )
     return entries
 
 
-def find_commands(folder, manifest, entries):
-    commands = []
+def classify_entry(path, is_folder):
+    if is_folder:
+        return "folder"
+    suffix = path.suffix.lower()
+    if suffix in RUNNABLE_SUFFIXES:
+        return "executable"
+    if suffix == ".json":
+        return "json"
+    if suffix in TEXT_SUFFIXES:
+        return "text"
+    if suffix in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}:
+        return "image"
+    return "file"
 
+
+def infer_presentation(folder, entries):
+    names = {entry["name"].lower() for entry in entries}
+    files = [entry for entry in entries if entry["kind"] == "file"]
+    suffixes = {Path(entry["name"]).suffix.lower() for entry in files}
+
+    if (folder / ".git").exists() or {"pyproject.toml", "package.json"} & names:
+        return "project-root"
+    if {"inbox", "outbox"} <= names or {"input", "output"} <= names:
+        return "factory"
+    if "archive" in folder.name.lower() or folder.name.lower().startswith("old"):
+        return "ruin"
+    if suffixes and suffixes <= {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}:
+        return "gallery"
+    if "inbox" in folder.name.lower():
+        return "inbox"
+    return "workbench"
+
+
+def normalize_optional_mode(value):
+    if value in (None, "", "auto"):
+        return None
+    return normalize_mode(value)
+
+
+def normalize_mode(value):
+    mode = str(value).strip().lower().replace("_", "-").replace(" ", "-")
+    return mode or "workbench"
+
+
+def normalize_buttons(raw):
+    source = raw.get("buttons")
+    if source is None:
+        source = raw.get("actions", [])
+    if not isinstance(source, list):
+        raise ValueError("manifest.buttons must be an array.")
+
+    buttons = []
+    for number, item in enumerate(source, 1):
+        if not isinstance(item, dict):
+            raise ValueError(f"manifest.buttons item {number} must be an object.")
+        kind = str(item.get("kind", "command" if "command" in item else "navigate"))
+        if kind not in {"command", "navigate"}:
+            raise ValueError(f"manifest.buttons item {number} has unknown kind: {kind}")
+
+        button = {
+            "id": str(item.get("id", uuid.uuid4())),
+            "kind": kind,
+            "label": str(item.get("label", f"Button {number}")),
+            "description": str(item.get("description", "")),
+        }
+        if kind == "navigate":
+            target = item.get("target", item.get("path", ""))
+            button["target"] = str(target)
+        else:
+            command = item.get("command", "")
+            if not isinstance(command, (str, list)):
+                raise ValueError(
+                    f"manifest.buttons item {number} command must be text or an array."
+                )
+            if isinstance(command, list) and not all(
+                isinstance(part, str) for part in command
+            ):
+                raise ValueError(
+                    f"manifest.buttons item {number} command array must contain text."
+                )
+            button["command"] = command
+        buttons.append(button)
+    return buttons
+
+
+def normalize_map_geometry(raw):
+    section = raw.get("directory-map", {})
+    if not isinstance(section, dict):
+        raise ValueError("manifest.directory-map must be an object.")
+    items = section.get("items", {})
+    if not isinstance(items, dict):
+        raise ValueError("manifest.directory-map.items must be an object.")
+
+    geometry = {}
+    for name, value in items.items():
+        if not isinstance(value, dict):
+            continue
+        try:
+            x = int(value["x"])
+            y = int(value["y"])
+            width = max(70, int(value["width"]))
+            height = max(44, int(value["height"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        geometry[str(name)] = {
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+        }
+    return geometry
+
+
+def detect_runnable_buttons(folder, entries, raw):
+    annotations = raw.get("commands", {})
+    if not isinstance(annotations, dict):
+        annotations = {}
+
+    buttons = []
     for entry in entries:
-        if entry["kind"] != "file":
+        if entry["visual-kind"] != "executable":
             continue
-
-        suffix = Path(entry["name"]).suffix.lower()
-        if suffix not in RUNNABLE_SUFFIXES:
-            continue
-
-        annotation = manifest["commands"].get(entry["name"], {})
-        commands.append(
+        note = annotations.get(entry["name"], {})
+        if isinstance(note, str):
+            note = {"label": note}
+        if not isinstance(note, dict):
+            note = {}
+        buttons.append(
             {
-                "source": "file",
-                "name": entry["name"],
-                "label": annotation.get("label", prettify_name(Path(entry["name"]).stem)),
-                "description": annotation.get("description", RUNNABLE_SUFFIXES[suffix]),
-                "importance": annotation.get("importance", "normal"),
+                "id": f"detected:{entry['name']}",
+                "kind": "command",
+                "source": "detected",
+                "label": str(note.get("label", prettify_name(Path(entry["name"]).stem))),
+                "description": str(note.get("description", entry["name"])),
                 "command": command_for_path(folder / entry["name"]),
             }
         )
-
-    for number, action in enumerate(manifest["actions"], 1):
-        commands.append(
-            {
-                "source": "action",
-                "name": f"action-{number}",
-                **action,
-            }
-        )
-
-    commands.sort(
-        key=lambda item: (
-            importance_rank(item["importance"]),
-            item["label"].lower(),
-        )
-    )
-    return commands
+    return buttons
 
 
 def command_for_path(path):
@@ -293,129 +274,94 @@ def command_for_path(path):
         return ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(path)]
     if suffix in {".bat", ".cmd"}:
         return ["cmd", "/c", str(path)]
+    if suffix == ".sh":
+        return ["sh", str(path)]
     return [str(path)]
 
 
-def calculate_signals(folder, entries, manifest):
-    folders = [entry for entry in entries if entry["kind"] == "folder"]
-    files = [entry for entry in entries if entry["kind"] == "file"]
-    recent = [entry for entry in entries if entry["age-days"] <= 7]
-    old = [entry for entry in entries if entry["age-days"] >= 365]
-    newest = min(entries, key=lambda item: item["age-days"]) if entries else None
-    oldest = max(entries, key=lambda item: item["age-days"]) if entries else None
-
-    return {
-        "folder-count": len(folders),
-        "file-count": len(files),
-        "recent-count": len(recent),
-        "year-old-count": len(old),
-        "newest": newest["name"] if newest else None,
-        "oldest": oldest["name"] if oldest else None,
-        "is-git-repository": (folder / ".git").exists(),
-        "has-readme": any(
-            entry["name"].lower().startswith("readme") for entry in files
-        ),
-        "declared-role": manifest["role"],
-    }
+def resolve_navigation_target(folder, target):
+    path = Path(target).expanduser()
+    if not path.is_absolute():
+        path = folder / path
+    return normalize_folder_path(path)
 
 
-def infer_role(folder):
-    names = {path.name.lower() for path in safe_iterdir(folder)}
-    suffixes = {path.suffix.lower() for path in safe_iterdir(folder) if path.is_file()}
-
-    if ".git" in names or "pyproject.toml" in names or "package.json" in names:
-        return "project-root"
-    if {"inbox", "outbox"} <= names or {"input", "output"} <= names:
-        return "factory"
-    if "archive" in folder.name.lower() or "old" in folder.name.lower():
-        return "ruin"
-    if suffixes and suffixes <= {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}:
-        return "gallery"
-    if "inbox" in folder.name.lower():
-        return "inbox"
-    return "workbench"
-
-
-def safe_iterdir(folder):
-    try:
-        return list(folder.iterdir())
-    except OSError:
-        return []
-
-
-def infer_state(role):
-    return "neglected" if role == "ruin" else "active"
-
-
-def infer_presentation(role):
-    if role in {"cockpit", "factory", "project-root"}:
-        return "cockpit"
-    if role == "gallery":
-        return "gallery"
-    return "place"
-
-
-def infer_purpose(role):
-    purposes = {
-        "factory": "Inputs become outputs here.",
-        "gallery": "A place for visual browsing.",
-        "inbox": "Incoming material waits here for attention.",
-        "library": "Reference material lives here for retrieval.",
-        "project-root": "A living software project and its local tools.",
-        "ruin": "An old place retained for memory or recovery.",
-        "vault": "Important material is kept here deliberately.",
-        "workbench": "Active material is being shaped here.",
-    }
-    return purposes.get(role, "An ordinary folder beginning to describe itself.")
-
-
-def infer_mood(role):
-    moods = {
-        "factory": "humming",
-        "gallery": "open",
-        "inbox": "expectant",
-        "library": "quiet",
-        "project-root": "awake",
-        "ruin": "dusty",
-        "vault": "guarded",
-        "workbench": "occupied",
-    }
-    return moods.get(role, "present")
-
-
-def importance_rank(value):
-    return {"primary": 0, "normal": 1, "secondary": 2}.get(value, 1)
-
-
-def prettify_name(value):
-    text = value.replace("-", " ").replace("_", " ").strip()
-    return " ".join(word.capitalize() for word in text.split()) or "Untitled Folder"
-
-
-def write_manifest_template(path):
-    """Atomically place a small editable constitution into a folder."""
-    folder = normalize_folder_path(path)
-    target = folder / MANIFEST_NAMES[0]
-    if target.exists():
-        raise ValueError(f"{target.name} already exists.")
-
-    role = infer_role(folder)
-    data = {
-        "living-folder": "0.1",
-        "title": prettify_name(folder.name),
-        "role": role,
-        "state": infer_state(role),
-        "purpose": infer_purpose(role),
-        "mood": infer_mood(role),
-        "commands": {},
-        "places": {},
-    }
-
+def write_manifest(folder, raw):
+    """Atomically write a folder constitution while preserving unknown fields."""
+    folder = normalize_folder_path(folder)
+    target = folder / MANIFEST_NAME
     temporary = target.with_suffix(target.suffix + ".tmp")
     with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-        json.dump(data, handle, indent=2, ensure_ascii=False)
+        json.dump(raw, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, target)
     return target
+
+
+def save_presentation(folder, mode):
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    if mode is None:
+        raw.pop("presentation-mode", None)
+    else:
+        raw["presentation-mode"] = normalize_mode(mode)
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
+def save_buttons(folder, buttons):
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    raw["buttons"] = buttons
+    raw.pop("actions", None)
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
+def save_map_geometry(folder, geometry):
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    section = raw.setdefault("directory-map", {})
+    section["items"] = geometry
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
+def write_manifest_template(path):
+    folder = normalize_folder_path(path)
+    target = folder / MANIFEST_NAME
+    if target.exists():
+        raise ValueError(f"{target.name} already exists.")
+    entries = read_entries(folder)
+    inferred = infer_presentation(folder, entries)
+    raw = {}
+    ensure_manifest_identity(raw, folder)
+    raw["role"] = inferred
+    raw["purpose"] = infer_purpose(inferred)
+    raw["buttons"] = []
+    raw["directory-map"] = {"items": {}}
+    return write_manifest(folder, raw)
+
+
+def ensure_manifest_identity(raw, folder):
+    path = Path(folder)
+    raw.setdefault("living-folder", "0.2")
+    raw.setdefault("title", prettify_name(path.name))
+
+
+def infer_purpose(mode):
+    purposes = {
+        "project-root": "A software project and its local controls.",
+        "factory": "Inputs, stages, and outputs live here.",
+        "gallery": "Visual material is arranged for browsing.",
+        "inbox": "Incoming material waits for attention.",
+        "library": "Reference material lives here for retrieval.",
+        "ruin": "Old ground retained for memory or recovery.",
+        "vault": "Important material is kept deliberately.",
+        "workbench": "Active material is being shaped here.",
+    }
+    return purposes.get(mode, "A folder presenting itself as a useful place.")
+
+
+def prettify_name(value):
+    text = value.replace("-", " ").replace("_", " ").strip()
+    return " ".join(word.capitalize() for word in text.split()) or "Untitled Folder"

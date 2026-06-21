@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "living-folders"
-version = "0.1.0"
+version = "0.2.0"
 description = "A semantic lens that lets directories present themselves as places."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ license = "CC0-1.0"
 authors = [
   {name = "Lion Kimbro"},
 ]
-dependencies = []
+dependencies = ["lionscliapp>=0.1.2"]
 
 [project.scripts]
 living-folders = "livingfolders.__main__:main"

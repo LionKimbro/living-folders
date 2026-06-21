@@ -1,6 +1,6 @@
 {
   "document": {
-    "document-id": "living-folders.manifest.softspec.v0",
+    "document-id": "living-folders.manifest.softspec.v0.2",
     "title": "Living Folder Manifest SoftSpec",
     "tags": [
       "living-folders",
@@ -8,59 +8,62 @@
       "json",
       "manifest"
     ],
-    "purpose": "Describe the intentionally permissive .living-folder.json structure used by the first Living Folders implementation."
+    "purpose": "Describe the permissive folder-local constitution used by Living Folders.",
+    "type": {
+      "logical": {
+        "base": "file",
+        "format": "json",
+        "encoding": "utf-8"
+      },
+      "semantic": {
+        "base": "softspec"
+      }
+    },
+    "status": "working"
   },
   "softspec": {
     "types": {
-      "importance": {
-        "type": "string",
-        "description": "A display emphasis hint.",
-        "vocabulary": {
-          "primary": "Present first and with stronger emphasis.",
-          "normal": "Use ordinary emphasis.",
-          "secondary": "Present after more important material."
-        },
-        "vocabulary_mode": "open"
-      },
-      "place-description": {
+      "folder-button": {
         "type": "object",
-        "description": "Local interpretation of an immediate child directory.",
+        "description": "A compact control-panel affordance.",
         "keys": {
-          "label": "human-facing name",
-          "role": "interpretive mode such as workbench, library, factory, hallway, or ruin",
-          "description": "short orientation note",
-          "importance": "importance"
-        },
-        "additional_keys": true
-      },
-      "command-description": {
-        "type": "object",
-        "description": "Presentation metadata for a runnable file already present in the directory.",
-        "keys": {
-          "label": "human-facing button label",
-          "description": "short explanation of what running the file does",
-          "importance": "importance"
-        },
-        "additional_keys": true
-      },
-      "action": {
-        "type": "object",
-        "description": "An explicitly declared command run from the living directory as its current working directory.",
-        "keys": {
+          "id": "stable local identifier",
+          "kind": {
+            "type": "string",
+            "required": true,
+            "vocabulary": {
+              "navigate": "Navigate Living Folders to target.",
+              "command": "Run command from this folder after explicit trust."
+            },
+            "vocabulary_mode": "closed"
+          },
           "label": {
             "type": "string",
-            "required": false
+            "required": true
           },
-          "description": "short explanation",
-          "importance": "importance",
+          "description": "optional orientation text",
+          "target": {
+            "type": "filesystem path string",
+            "required": "when kind is navigate"
+          },
           "command": {
             "type": [
               "string",
               "array"
             ],
-            "required": true,
-            "description": "A shell command string or an argument array. Argument arrays are preferred when shell syntax is unnecessary."
+            "required": "when kind is command"
           }
+        },
+        "additional_keys": true
+      },
+      "map-geometry": {
+        "type": "object",
+        "description": "Committed rectangle geometry in canvas coordinates.",
+        "keys": {
+          "x": "integer",
+          "y": "integer",
+          "width": "integer, at least 70",
+          "height": "integer, at least 44"
         },
         "additional_keys": true
       }
@@ -68,64 +71,44 @@
     "schemas": {
       "living-folder-manifest": {
         "title": "Living Folder Manifest",
-        "description": "A folder's small local constitution. Every field except declared action.command is optional.",
+        "description": "A folder's small local constitution. Unknown keys are preserved.",
         "rules": [
-          "Unknown keys are preserved in the file and ignored by the current reader.",
-          "Unknown role values are accepted as new interpretive vocabulary.",
-          "commands annotates existing runnable files; actions declares commands that need not correspond to one file.",
-          "The file describes presentation and affordances. It does not replace the directory."
+          "Omitting presentation-mode returns presentation authority to inference.",
+          "buttons contains user-declared controls; runnable files may additionally be detected from the directory.",
+          "directory-map geometry is keyed by the immediate child entry name.",
+          "The constitution augments the filesystem and never replaces it."
         ],
         "structure": {
           "type": "object",
           "keys": {
             "living-folder": "format version string",
-            "title": "human-facing name for the directory",
-            "role": "interpretive mode for presenting the directory",
-            "state": "current condition such as active, paused, neglected, or awakening",
-            "presentation": "broad presentation hint such as cockpit, gallery, or place",
-            "purpose": "one or two sentences explaining why the directory exists",
-            "mood": "evocative but operationally optional description of the place",
-            "warning": "important caution to show prominently",
-            "commands": {
-              "type": "object",
-              "key_type": "filename",
-              "value_type": "command-description"
+            "title": "human-facing folder title",
+            "role": "semantic role vocabulary; may be inferred or authored",
+            "purpose": "short statement of why this place exists",
+            "presentation-mode": {
+              "type": "string",
+              "required": false,
+              "description": "Explicit presentation override such as directory-map, project-root, workbench, factory, library, gallery, inbox, vault, warehouse, hallway, or ruin."
             },
-            "actions": {
+            "buttons": {
               "type": "array",
-              "items": "action"
+              "items": "folder-button"
             },
-            "places": {
+            "commands": "optional mapped annotations for detected runnable filenames",
+            "directory-map": {
               "type": "object",
-              "key_type": "immediate child directory name",
-              "value_type": "place-description"
+              "keys": {
+                "items": {
+                  "type": "object",
+                  "key_type": "immediate child filename",
+                  "value_type": "map-geometry"
+                }
+              },
+              "additional_keys": true
             }
           },
           "additional_keys": true
         }
-      }
-    }
-  },
-  "example": {
-    "living-folder": "0.1",
-    "title": "Sticker Print Queue",
-    "role": "factory",
-    "state": "active",
-    "purpose": "Launch prepared sticker jobs.",
-    "commands": {
-      "run_queue.py": {
-        "label": "Run Queue",
-        "importance": "primary"
-      }
-    },
-    "places": {
-      "incoming": {
-        "role": "inbox",
-        "label": "Waiting Jobs"
-      },
-      "done": {
-        "role": "warehouse",
-        "label": "Completed Jobs"
       }
     }
   }
