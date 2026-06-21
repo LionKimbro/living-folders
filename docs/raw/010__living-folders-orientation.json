@@ -1,0 +1,52 @@
+{
+  "document": {
+    "document-id": "living-folders.orientation.v0",
+    "title": "Living Folders Orientation",
+    "tags": [
+      "living-folders",
+      "filesystem",
+      "semantic-interface",
+      "orientation"
+    ],
+    "purpose": "Orient humans and LLMs to the first working form of Living Folders."
+  },
+  "keystone": [
+    "A directory should be allowed to present itself according to its purpose.",
+    "The filesystem is already a database, a workspace, a map, and a control surface, but ordinary browsers mostly show it as a list."
+  ],
+  "present-form": {
+    "identity": "A dependency-free Python and Tkinter semantic lens over one ordinary directory at a time.",
+    "boundary": "Living Folders does not import, relocate, own, or hide the user's files.",
+    "constitution": "A directory may describe itself through .living-folder.json. Two earlier names, .directory-role.json and .decorator.json, are also recognized.",
+    "portrait": [
+      "declared or inferred role",
+      "title, purpose, state, and mood",
+      "important subfolders presented as places",
+      "age and activity signals",
+      "detected runnable files and declared actions",
+      "raw files as a fallback material list"
+    ],
+    "execution-safety": "Commands are visible but disabled until the user explicitly trusts runnable code in the open folder. Commands run with that directory as their current working directory."
+  },
+  "interpretive-modes": {
+    "project-root": "Emphasize code areas, project signals, and local commands.",
+    "factory": "Emphasize inputs, outputs, stages, and production affordances.",
+    "gallery": "Emphasize visual material and browsing.",
+    "library": "Emphasize reference and retrieval.",
+    "ruin": "Emphasize age, warning, neglect, and historical truth.",
+    "workbench": "Emphasize active material, recency, and tools."
+  },
+  "commands": {
+    "open": "living-folders <folder>",
+    "inspect": "living-folders <folder> --inspect",
+    "create-constitution": "living-folders <folder> --init"
+  },
+  "design-discipline": [
+    "The filesystem remains authoritative.",
+    "External JSON is normalized once at the castle gate.",
+    "The GUI consumes one canonical folder portrait.",
+    "Observation is immediate; execution requires trust.",
+    "Unknown roles remain usable instead of being rejected.",
+    "The application should stay small enough to understand at a glance."
+  ]
+}

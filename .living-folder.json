@@ -1,0 +1,54 @@
+{
+  "living-folder": "0.1",
+  "title": "Living Folders",
+  "role": "project-root",
+  "state": "awakening",
+  "presentation": "cockpit",
+  "purpose": "Give ordinary directories a local voice, role, and set of affordances.",
+  "mood": "newly alive",
+  "commands": {},
+  "actions": [
+    {
+      "label": "Inspect This Place",
+      "description": "Print the canonical portrait Living Folders sees for its own project root.",
+      "importance": "primary",
+      "command": [
+        "python",
+        "-m",
+        "livingfolders",
+        ".",
+        "--inspect"
+      ]
+    },
+    {
+      "label": "Run Tests",
+      "description": "Exercise manifest normalization, role inference, and command discovery.",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ]
+    }
+  ],
+  "places": {
+    "src": {
+      "role": "workbench",
+      "label": "Code Body",
+      "description": "The living implementation."
+    },
+    "docs": {
+      "role": "library",
+      "label": "Design Memory",
+      "description": "Orientation and structural descriptions."
+    },
+    "tests": {
+      "role": "factory",
+      "label": "Verification Floor",
+      "description": "Inputs become confidence here."
+    }
+  }
+}

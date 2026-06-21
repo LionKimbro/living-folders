@@ -1,0 +1,132 @@
+{
+  "document": {
+    "document-id": "living-folders.manifest.softspec.v0",
+    "title": "Living Folder Manifest SoftSpec",
+    "tags": [
+      "living-folders",
+      "softspec",
+      "json",
+      "manifest"
+    ],
+    "purpose": "Describe the intentionally permissive .living-folder.json structure used by the first Living Folders implementation."
+  },
+  "softspec": {
+    "types": {
+      "importance": {
+        "type": "string",
+        "description": "A display emphasis hint.",
+        "vocabulary": {
+          "primary": "Present first and with stronger emphasis.",
+          "normal": "Use ordinary emphasis.",
+          "secondary": "Present after more important material."
+        },
+        "vocabulary_mode": "open"
+      },
+      "place-description": {
+        "type": "object",
+        "description": "Local interpretation of an immediate child directory.",
+        "keys": {
+          "label": "human-facing name",
+          "role": "interpretive mode such as workbench, library, factory, hallway, or ruin",
+          "description": "short orientation note",
+          "importance": "importance"
+        },
+        "additional_keys": true
+      },
+      "command-description": {
+        "type": "object",
+        "description": "Presentation metadata for a runnable file already present in the directory.",
+        "keys": {
+          "label": "human-facing button label",
+          "description": "short explanation of what running the file does",
+          "importance": "importance"
+        },
+        "additional_keys": true
+      },
+      "action": {
+        "type": "object",
+        "description": "An explicitly declared command run from the living directory as its current working directory.",
+        "keys": {
+          "label": {
+            "type": "string",
+            "required": false
+          },
+          "description": "short explanation",
+          "importance": "importance",
+          "command": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "required": true,
+            "description": "A shell command string or an argument array. Argument arrays are preferred when shell syntax is unnecessary."
+          }
+        },
+        "additional_keys": true
+      }
+    },
+    "schemas": {
+      "living-folder-manifest": {
+        "title": "Living Folder Manifest",
+        "description": "A folder's small local constitution. Every field except declared action.command is optional.",
+        "rules": [
+          "Unknown keys are preserved in the file and ignored by the current reader.",
+          "Unknown role values are accepted as new interpretive vocabulary.",
+          "commands annotates existing runnable files; actions declares commands that need not correspond to one file.",
+          "The file describes presentation and affordances. It does not replace the directory."
+        ],
+        "structure": {
+          "type": "object",
+          "keys": {
+            "living-folder": "format version string",
+            "title": "human-facing name for the directory",
+            "role": "interpretive mode for presenting the directory",
+            "state": "current condition such as active, paused, neglected, or awakening",
+            "presentation": "broad presentation hint such as cockpit, gallery, or place",
+            "purpose": "one or two sentences explaining why the directory exists",
+            "mood": "evocative but operationally optional description of the place",
+            "warning": "important caution to show prominently",
+            "commands": {
+              "type": "object",
+              "key_type": "filename",
+              "value_type": "command-description"
+            },
+            "actions": {
+              "type": "array",
+              "items": "action"
+            },
+            "places": {
+              "type": "object",
+              "key_type": "immediate child directory name",
+              "value_type": "place-description"
+            }
+          },
+          "additional_keys": true
+        }
+      }
+    }
+  },
+  "example": {
+    "living-folder": "0.1",
+    "title": "Sticker Print Queue",
+    "role": "factory",
+    "state": "active",
+    "purpose": "Launch prepared sticker jobs.",
+    "commands": {
+      "run_queue.py": {
+        "label": "Run Queue",
+        "importance": "primary"
+      }
+    },
+    "places": {
+      "incoming": {
+        "role": "inbox",
+        "label": "Waiting Jobs"
+      },
+      "done": {
+        "role": "warehouse",
+        "label": "Completed Jobs"
+      }
+    }
+  }
+}
