@@ -1,0 +1,13 @@
+{
+  "zookeep-project-guid": "72249840-4f7a-4b5c-b5d7-36a585339885",
+  "name": "living-folders",
+  "repo-type": "python-2026-03",
+  "license": "CC0-1.0",
+  "repository": {
+    "name": "living-folders",
+    "visibility": "public"
+  },
+  "python-package": {
+    "name": "livingfolders"
+  }
+}
