@@ -55,6 +55,7 @@ def inspect_folder(path):
     inferred = infer_presentation(folder, entries)
     explicit = normalize_optional_mode(raw.get("presentation-mode"))
     buttons = normalize_buttons(raw)
+    command_annotations = normalize_command_annotations(raw)
     geometry = normalize_map_geometry(raw)
 
     return {
@@ -67,8 +68,14 @@ def inspect_folder(path):
         "inferred-presentation": inferred,
         "explicit-presentation": explicit,
         "active-presentation": explicit or inferred,
+        "trust-runnable-code": raw.get("trust-runnable-code") is True,
         "buttons": buttons,
-        "detected-buttons": detect_runnable_buttons(folder, entries, raw),
+        "command-annotations": command_annotations,
+        "detected-buttons": detect_runnable_buttons(
+            folder,
+            entries,
+            command_annotations,
+        ),
         "map-geometry": geometry,
         "entries": entries,
     }
@@ -211,6 +218,24 @@ def normalize_buttons(raw):
     return buttons
 
 
+def normalize_command_annotations(raw):
+    source = raw.get("commands", {})
+    if not isinstance(source, dict):
+        raise ValueError("manifest.commands must be an object.")
+    annotations = {}
+    for filename, value in source.items():
+        if isinstance(value, str):
+            value = {"label": value}
+        if not isinstance(value, dict):
+            raise ValueError(f"manifest.commands.{filename} must be an object or string.")
+        annotations[str(filename)] = {
+            "label": str(value.get("label", "")),
+            "description": str(value.get("description", "")),
+            "hidden": value.get("hidden") is True,
+        }
+    return annotations
+
+
 def normalize_map_geometry(raw):
     section = raw.get("directory-map", {})
     if not isinstance(section, dict):
@@ -239,27 +264,22 @@ def normalize_map_geometry(raw):
     return geometry
 
 
-def detect_runnable_buttons(folder, entries, raw):
-    annotations = raw.get("commands", {})
-    if not isinstance(annotations, dict):
-        annotations = {}
-
+def detect_runnable_buttons(folder, entries, annotations):
     buttons = []
     for entry in entries:
         if entry["visual-kind"] != "executable":
             continue
         note = annotations.get(entry["name"], {})
-        if isinstance(note, str):
-            note = {"label": note}
-        if not isinstance(note, dict):
-            note = {}
+        if note.get("hidden") is True:
+            continue
         buttons.append(
             {
                 "id": f"detected:{entry['name']}",
                 "kind": "command",
                 "source": "detected",
-                "label": str(note.get("label", prettify_name(Path(entry["name"]).stem))),
-                "description": str(note.get("description", entry["name"])),
+                "filename": entry["name"],
+                "label": note.get("label") or prettify_name(Path(entry["name"]).stem),
+                "description": note.get("description") or entry["name"],
                 "command": command_for_path(folder / entry["name"]),
             }
         )
@@ -310,10 +330,26 @@ def save_presentation(folder, mode):
     return write_manifest(folder, raw)
 
 
+def save_code_trust(folder, trusted):
+    """Persist whether this particular folder's runnable code is trusted."""
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    raw["trust-runnable-code"] = bool(trusted)
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
 def save_buttons(folder, buttons):
     _path, raw = read_manifest(normalize_folder_path(folder))
     raw["buttons"] = buttons
     raw.pop("actions", None)
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
+def save_command_annotations(folder, annotations):
+    """Persist labels and tombstones for detected executable-file buttons."""
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    raw["commands"] = annotations
     ensure_manifest_identity(raw, folder)
     return write_manifest(folder, raw)
 
@@ -324,6 +360,17 @@ def save_map_geometry(folder, geometry):
     section["items"] = geometry
     ensure_manifest_identity(raw, folder)
     return write_manifest(folder, raw)
+
+
+def delete_immediate_file(folder, path):
+    """Delete one immediate regular file after the GUI has confirmed intent."""
+    folder = normalize_folder_path(folder)
+    target = Path(path).expanduser().resolve()
+    if target.parent != folder:
+        raise ValueError("Living Folders only deletes immediate files in the open folder.")
+    if not target.is_file():
+        raise ValueError(f"Not a deletable file: {target.name}")
+    target.unlink()
 
 
 def write_manifest_template(path):

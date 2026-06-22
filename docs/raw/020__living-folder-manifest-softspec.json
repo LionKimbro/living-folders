@@ -85,6 +85,10 @@
             "title": "human-facing folder title",
             "role": "semantic role vocabulary; may be inferred or authored",
             "purpose": "short statement of why this place exists",
+            "trust-runnable-code": {
+              "type": "boolean",
+              "description": "Whether the user has explicitly trusted runnable code in this particular folder."
+            },
             "presentation-mode": {
               "type": "string",
               "required": false,

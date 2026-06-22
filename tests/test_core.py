@@ -5,7 +5,10 @@ import unittest
 from pathlib import Path
 
 from livingfolders.core import (
+    delete_immediate_file,
     inspect_folder,
+    save_code_trust,
+    save_command_annotations,
     save_map_geometry,
     save_presentation,
     write_manifest_template,
@@ -81,6 +84,68 @@ class FolderModelTests(unittest.TestCase):
             self.assertEqual({"still": "here"}, saved["future-field"])
             self.assertEqual("directory-map", saved["presentation-mode"])
             self.assertFalse(path.with_suffix(path.suffix + ".tmp").exists())
+
+    def test_detected_button_can_be_relabelled_or_tombstoned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            (folder / "build.bat").write_text("@echo off\n", encoding="utf-8")
+
+            save_command_annotations(
+                folder,
+                {
+                    "build.bat": {
+                        "label": "Build Everything",
+                        "description": "",
+                        "hidden": False,
+                    }
+                },
+            )
+            model = inspect_folder(folder)
+            self.assertEqual("Build Everything", model["detected-buttons"][0]["label"])
+
+            save_command_annotations(
+                folder,
+                {
+                    "build.bat": {
+                        "label": "Build Everything",
+                        "description": "",
+                        "hidden": True,
+                    }
+                },
+            )
+            model = inspect_folder(folder)
+            self.assertEqual([], model["detected-buttons"])
+            self.assertTrue(model["command-annotations"]["build.bat"]["hidden"])
+
+    def test_delete_only_allows_immediate_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            file_path = folder / "goodbye.txt"
+            file_path.write_text("bye", encoding="utf-8")
+            nested = folder / "nested"
+            nested.mkdir()
+            nested_file = nested / "not-from-here.txt"
+            nested_file.write_text("stay", encoding="utf-8")
+
+            delete_immediate_file(folder, file_path)
+
+            self.assertFalse(file_path.exists())
+            with self.assertRaises(ValueError):
+                delete_immediate_file(folder, nested_file)
+            self.assertTrue(nested_file.exists())
+
+    def test_code_trust_is_stored_by_the_particular_folder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trusted = root / "trusted"
+            untrusted = root / "untrusted"
+            trusted.mkdir()
+            untrusted.mkdir()
+
+            save_code_trust(trusted, True)
+
+            self.assertTrue(inspect_folder(trusted)["trust-runnable-code"])
+            self.assertFalse(inspect_folder(untrusted)["trust-runnable-code"])
 
 
 if __name__ == "__main__":

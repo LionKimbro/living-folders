@@ -12,9 +12,12 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from .core import (
     PRESENTATION_MODES,
+    delete_immediate_file,
     inspect_folder,
     resolve_navigation_target,
     save_buttons,
+    save_code_trust,
+    save_command_annotations,
     save_map_geometry,
     save_presentation,
 )
@@ -286,9 +289,17 @@ def route_effect(effect):
     elif name == "SAVE_PRESENTATION":
         save_presentation(effect["folder"], effect["mode"])
         dispatch({"type": "REFRESH"})
+    elif name == "SAVE_CODE_TRUST":
+        save_code_trust(effect["folder"], effect["trusted"])
+        dispatch({"type": "REFRESH"})
     elif name == "WRITE_BUTTONS":
         save_buttons(effect["folder"], effect["buttons"])
         dispatch({"type": "REFRESH"})
+    elif name == "WRITE_COMMAND_ANNOTATIONS":
+        save_command_annotations(effect["folder"], effect["annotations"])
+        dispatch({"type": "REFRESH"})
+    elif name == "DELETE_FILE":
+        delete_file_effect(effect)
     elif name == "WRITE_MAP_GEOMETRY":
         save_map_geometry(effect["folder"], effect["geometry"])
     elif name == "PROJECT":
@@ -318,6 +329,15 @@ def load_folder_effect(effect):
             "status": f"Opened {model['folder']}",
         }
     )
+
+
+def delete_file_effect(effect):
+    try:
+        delete_immediate_file(effect["folder"], effect["path"])
+    except (OSError, ValueError) as error:
+        dispatch({"type": "SET_STATUS", "text": str(error)})
+        return
+    dispatch({"type": "REFRESH"})
 
 
 def project_everything():
@@ -484,6 +504,7 @@ def build_directory_map(parent):
     canvas.bind("<B1-Motion>", handle_map_motion)
     canvas.bind("<ButtonRelease-1>", handle_map_release)
     canvas.bind("<Double-Button-1>", handle_map_double_click)
+    canvas.bind("<Delete>", handle_delete_key)
     g["widgets"]["map"] = canvas
     project_map()
 
@@ -562,6 +583,7 @@ def default_geometry(number):
 
 def handle_map_press(event):
     canvas = g["widgets"]["map"]
+    canvas.focus_set()
     items = canvas.find_overlapping(
         canvas.canvasx(event.x),
         canvas.canvasy(event.y),
@@ -647,6 +669,35 @@ def handle_map_double_click(event):
         if item in g["map-item-entry"]:
             open_entry_by_name(g["map-item-entry"][item])
             return
+
+
+def handle_delete_key(_event=None):
+    if not g["state"]["model"]:
+        return
+    if g["state"]["model"]["active-presentation"] != "directory-map":
+        return
+    name = g["state"]["selected-entry"]
+    if not name:
+        return
+
+    entry = find_entry(name)
+    if entry["kind"] != "file":
+        dispatch(
+            {
+                "type": "SET_STATUS",
+                "text": "Delete only removes files; folders are left alone.",
+            }
+        )
+        return
+
+    confirmed = messagebox.askyesno(
+        "Delete file?",
+        f"Permanently delete this file?\n\n{entry['name']}",
+        icon="warning",
+        parent=g["tk"],
+    )
+    if confirmed:
+        dispatch({"type": "DELETE_FILE", "path": entry["path"]})
 
 
 def current_canvas_geometry(name):
@@ -735,10 +786,14 @@ def handle_tree_double_click(_event):
 
 
 def open_entry_by_name(name):
+    open_entry(find_entry(name))
+
+
+def find_entry(name):
     for entry in g["state"]["model"]["entries"]:
         if entry["name"] == name:
-            open_entry(entry)
-            return
+            return entry
+    raise ValueError(f"Entry is no longer present: {name}")
 
 
 def open_entry(entry):
@@ -799,14 +854,28 @@ def open_button_editor():
     window.rowconfigure(0, weight=1)
 
     buttons = [dict(item) for item in g["state"]["model"]["buttons"]]
+    detected = [dict(item) for item in g["state"]["model"]["detected-buttons"]]
+    annotations = {
+        filename: dict(note)
+        for filename, note in g["state"]["model"]["command-annotations"].items()
+    }
+    rows = []
     listbox = tk.Listbox(window, font=("Segoe UI", 10))
     listbox.grid(row=0, column=0, columnspan=5, sticky="nsew", padx=12, pady=12)
 
     def refresh_list():
+        rows.clear()
         listbox.delete(0, "end")
         for item in buttons:
+            rows.append(("declared", item))
             detail = item.get("target", item.get("command", ""))
             listbox.insert("end", f"{item['label']}  [{item['kind']}]  {detail}")
+        for item in detected:
+            rows.append(("detected", item))
+            listbox.insert(
+                "end",
+                f"{item['label']}  [detected executable]  {item['filename']}",
+            )
 
     def add_navigation():
         target = filedialog.askdirectory(
@@ -859,7 +928,7 @@ def open_button_editor():
         selection = listbox.curselection()
         if not selection:
             return
-        item = buttons[selection[0]]
+        source, item = rows[selection[0]]
         label = simpledialog.askstring(
             "Button label",
             "Label:",
@@ -867,6 +936,17 @@ def open_button_editor():
             initialvalue=item["label"],
         )
         if not label:
+            return
+        if source == "detected":
+            note = annotations.get(item["filename"], {})
+            if isinstance(note, str):
+                note = {"label": note}
+            note = dict(note)
+            note["label"] = label
+            note.pop("hidden", None)
+            annotations[item["filename"]] = note
+            item["label"] = label
+            refresh_list()
             return
         key = "target" if item["kind"] == "navigate" else "command"
         value = simpledialog.askstring(
@@ -883,12 +963,29 @@ def open_button_editor():
 
     def delete_selected():
         selection = listbox.curselection()
-        if selection:
-            del buttons[selection[0]]
-            refresh_list()
+        if not selection:
+            return
+        source, item = rows[selection[0]]
+        if source == "detected":
+            note = annotations.get(item["filename"], {})
+            if isinstance(note, str):
+                note = {"label": note}
+            note = dict(note)
+            note["hidden"] = True
+            annotations[item["filename"]] = note
+            detected.remove(item)
+        else:
+            buttons.remove(item)
+        refresh_list()
 
     def save_and_close():
         dispatch({"type": "SAVE_BUTTONS", "buttons": buttons})
+        dispatch(
+            {
+                "type": "SAVE_COMMAND_ANNOTATIONS",
+                "annotations": annotations,
+            }
+        )
         window.destroy()
 
     controls = [

@@ -36,7 +36,7 @@ def reduce(state, event):
         state["folder"] = event["model"]["folder"]
         state["model"] = event["model"]
         state["selected-entry"] = None
-        state["trust-code"] = False
+        state["trust-code"] = event["model"]["trust-runnable-code"]
         state["status"] = event.get("status", "Folder loaded.")
         effects.append({"type": "PROJECT"})
 
@@ -52,7 +52,13 @@ def reduce(state, event):
 
     elif name == "SET_TRUST":
         state["trust-code"] = bool(event["value"])
-        effects.append({"type": "PROJECT_ACTIONS"})
+        effects.append(
+            {
+                "type": "SAVE_CODE_TRUST",
+                "folder": state["folder"],
+                "trusted": state["trust-code"],
+            }
+        )
 
     elif name == "SET_PRESENTATION":
         effects.append(
@@ -69,6 +75,24 @@ def reduce(state, event):
                 "type": "WRITE_BUTTONS",
                 "folder": state["folder"],
                 "buttons": event["buttons"],
+            }
+        )
+
+    elif name == "SAVE_COMMAND_ANNOTATIONS":
+        effects.append(
+            {
+                "type": "WRITE_COMMAND_ANNOTATIONS",
+                "folder": state["folder"],
+                "annotations": event["annotations"],
+            }
+        )
+
+    elif name == "DELETE_FILE":
+        effects.append(
+            {
+                "type": "DELETE_FILE",
+                "folder": state["folder"],
+                "path": event["path"],
             }
         )
 
