@@ -13,7 +13,7 @@ venv/
 .focus-explorer/
 .pycard/
 .zookeep/
-.living-folders/
+.living-folder/
 .living-folder.json
 .context-jetpack/
 zookeeper-report.json
