@@ -75,7 +75,9 @@ def inspect_folder(path):
     geometry = normalize_map_geometry(raw)
     map_texts = normalize_map_texts(raw)
     map_images = normalize_map_images(raw)
-    map_z_order = normalize_map_z_order(raw, entries, map_texts, map_images)
+    map_entry_states = normalize_map_entry_states(raw, entries, geometry)
+    map_entries = reconcile_map_entries(folder, entries, map_entry_states)
+    map_z_order = normalize_map_z_order(raw, map_entries, map_texts, map_images)
     temporal_view = normalize_temporal_view(raw)
     temporal = build_temporal_model(entries, temporal_view)
 
@@ -98,6 +100,10 @@ def inspect_folder(path):
             command_annotations,
         ),
         "map-geometry": geometry,
+        "map-entry-states": map_entry_states,
+        "map-entries": map_entries,
+        "map-incoming": incoming_map_entries(entries, map_entry_states),
+        "map-ignored": ignored_map_entries(entries, map_entry_states),
         "map-texts": map_texts,
         "map-images": map_images,
         "map-z-order": map_z_order,
@@ -455,6 +461,96 @@ def normalize_map_geometry(raw):
     return geometry
 
 
+def normalize_map_entry_states(raw, entries, geometry):
+    """Normalize durable placement intent and migrate older map constitutions."""
+    section = raw.get("directory-map", {})
+    if not isinstance(section, dict):
+        raise ValueError("manifest.directory-map must be an object.")
+    source = section.get("entry-states")
+    if source is not None and not isinstance(source, dict):
+        raise ValueError("manifest.directory-map.entry-states must be an object.")
+
+    current = {entry["name"]: entry for entry in entries}
+    states = {}
+    if source is not None:
+        for name, value in source.items():
+            if not isinstance(value, dict):
+                continue
+            state = str(value.get("state", "placed")).lower()
+            if state not in {"placed", "ignored"}:
+                continue
+            live = current.get(str(name))
+            states[str(name)] = {
+                "state": state,
+                "kind": str(value.get("kind", live["kind"] if live else "file")),
+                "visual-kind": str(
+                    value.get(
+                        "visual-kind",
+                        live["visual-kind"] if live else "file",
+                    )
+                ),
+            }
+        return states
+
+    # Older maps implicitly treated persisted entry layers and geometry as placed.
+    legacy_names = set(geometry)
+    z_order = section.get("z-order", [])
+    if isinstance(z_order, list):
+        legacy_names.update(
+            str(key).split(":", 1)[1]
+            for key in z_order
+            if str(key).startswith("entry:")
+        )
+    for name in legacy_names:
+        live = current.get(name)
+        states[name] = {
+            "state": "placed",
+            "kind": live["kind"] if live else "file",
+            "visual-kind": live["visual-kind"] if live else "file",
+        }
+    return states
+
+
+def reconcile_map_entries(folder, entries, states):
+    """Return placed live entries and retained ghosts in one drawable collection."""
+    current = {entry["name"]: entry for entry in entries}
+    result = []
+    for name, state in states.items():
+        if state["state"] != "placed":
+            continue
+        if name in current:
+            result.append({**current[name], "missing": False})
+            continue
+        result.append(
+            {
+                "name": name,
+                "path": str(Path(folder) / name),
+                "kind": state["kind"],
+                "visual-kind": state["visual-kind"],
+                "size": None,
+                "modified": None,
+                "missing": True,
+            }
+        )
+    return result
+
+
+def incoming_map_entries(entries, states):
+    return [
+        entry
+        for entry in entries
+        if entry["name"] not in states
+    ]
+
+
+def ignored_map_entries(entries, states):
+    return [
+        entry
+        for entry in entries
+        if states.get(entry["name"], {}).get("state") == "ignored"
+    ]
+
+
 def normalize_map_texts(raw):
     section = raw.get("directory-map", {})
     if not isinstance(section, dict):
@@ -656,6 +752,14 @@ def save_map_geometry(folder, geometry):
     return write_manifest(folder, raw)
 
 
+def save_map_entry_states(folder, states):
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    section = raw.setdefault("directory-map", {})
+    section["entry-states"] = states
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
 def save_map_texts(folder, texts):
     _path, raw = read_manifest(normalize_folder_path(folder))
     section = raw.setdefault("directory-map", {})
@@ -847,6 +951,7 @@ def write_manifest_template(path):
     raw["purpose"] = infer_purpose(inferred)
     raw["buttons"] = []
     raw["directory-map"] = {
+        "entry-states": {},
         "items": {},
         "texts": [],
         "images": [],

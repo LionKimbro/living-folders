@@ -1,6 +1,6 @@
 {
   "document": {
-    "document-id": "living-folders.manifest.softspec.v0.5",
+    "document-id": "living-folders.manifest.softspec.v0.6",
     "title": "Living Folder Manifest SoftSpec",
     "tags": [
       "living-folders",
@@ -64,6 +64,24 @@
           "y": "integer",
           "width": "integer, at least 70",
           "height": "integer, at least 44"
+        },
+        "additional_keys": true
+      },
+      "map-entry-state": {
+        "type": "object",
+        "description": "Durable reconciliation intent for one immediate filesystem entry.",
+        "keys": {
+          "state": {
+            "type": "string",
+            "required": true,
+            "vocabulary": {
+              "placed": "Render this entry on the map; retain it as a missing ghost if it disappears from disk.",
+              "ignored": "Keep the entry out of both the map and Incoming tray until restored."
+            },
+            "vocabulary_mode": "closed"
+          },
+          "kind": "last known filesystem kind, such as file or folder",
+          "visual-kind": "last known visual classification used when rendering a missing ghost"
         },
         "additional_keys": true
       },
@@ -192,6 +210,10 @@
           ,
           "Temporal interpretation gathers entries around dates found in names; it does not move or rewrite those entries.",
           "Unmatched temporal entries remain visible in the exceptions shelf unless an explicit hidden-file-pattern matches them."
+          ,
+          "Directory Map entries are reconciled as placed, incoming, ignored, or missing.",
+          "Incoming is derived from immediate filesystem entries absent from entry-states; missing is derived from placed entry-states absent from the filesystem.",
+          "Removing a missing ghost removes only its map records because no filesystem entry remains to delete."
         ],
         "structure": {
           "type": "object",
@@ -218,6 +240,12 @@
             "directory-map": {
               "type": "object",
               "keys": {
+                "entry-states": {
+                  "type": "object",
+                  "key_type": "immediate child filename",
+                  "value_type": "map-entry-state",
+                  "description": "Placed and ignored intent. Entries absent from this object appear in Incoming."
+                },
                 "items": {
                   "type": "object",
                   "key_type": "immediate child filename",

@@ -13,6 +13,7 @@ def initial_state():
         "selected-text": None,
         "selected-image": None,
         "group-selection": [],
+        "map-placement-entry": None,
         "status": "Ready.",
     }
 
@@ -42,6 +43,7 @@ def reduce(state, event):
         state["selected-text"] = None
         state["selected-image"] = None
         state["group-selection"] = []
+        state["map-placement-entry"] = None
         state["trust-code"] = event["model"]["trust-runnable-code"]
         state["status"] = event.get("status", "Folder loaded.")
         effects.append({"type": "PROJECT"})
@@ -114,6 +116,197 @@ def reduce(state, event):
             }
         )
         effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "BEGIN_MAP_PLACEMENT":
+        state["map-placement-entry"] = event["entry-name"]
+        state["status"] = (
+            f"Placing {event['entry-name']}: click the map or press Escape to cancel."
+        )
+        effects.extend(
+            [
+                {"type": "PROJECT_INCOMING"},
+                {"type": "PROJECT_STATUS"},
+            ]
+        )
+
+    elif name == "CANCEL_MAP_PLACEMENT":
+        state["map-placement-entry"] = None
+        state["status"] = "Placement cancelled."
+        effects.extend(
+            [
+                {"type": "PROJECT_INCOMING"},
+                {"type": "PROJECT_STATUS"},
+            ]
+        )
+
+    elif name == "PLACE_MAP_ENTRY":
+        name = event["entry-name"]
+        entry = next(
+            item
+            for item in state["model"]["entries"]
+            if item["name"] == name
+        )
+        states = deepcopy(state["model"]["map-entry-states"])
+        states[name] = {
+            "state": "placed",
+            "kind": entry["kind"],
+            "visual-kind": entry["visual-kind"],
+        }
+        geometry = deepcopy(state["model"]["map-geometry"])
+        geometry[name] = deepcopy(event["geometry"])
+        map_entries = [
+            item
+            for item in state["model"]["map-entries"]
+            if item["name"] != name
+        ]
+        map_entries.append({**deepcopy(entry), "missing": False})
+        incoming = [
+            item
+            for item in state["model"]["map-incoming"]
+            if item["name"] != name
+        ]
+        z_order = [
+            key
+            for key in state["model"]["map-z-order"]
+            if key != f"entry:{name}"
+        ]
+        z_order.append(f"entry:{name}")
+        state["model"]["map-entry-states"] = states
+        state["model"]["map-geometry"] = geometry
+        state["model"]["map-entries"] = map_entries
+        state["model"]["map-incoming"] = incoming
+        state["model"]["map-z-order"] = z_order
+        state["map-placement-entry"] = None
+        state["selected-entry"] = name
+        state["status"] = f"Placed {name} on the Directory Map."
+        effects.extend(
+            [
+                {
+                    "type": "WRITE_MAP_ENTRY_STATES",
+                    "folder": state["folder"],
+                    "states": states,
+                },
+                {
+                    "type": "WRITE_MAP_GEOMETRY",
+                    "folder": state["folder"],
+                    "geometry": geometry,
+                },
+                {
+                    "type": "WRITE_MAP_Z_ORDER",
+                    "folder": state["folder"],
+                    "z-order": z_order,
+                },
+                {"type": "PROJECT_DIRECTORY_MAP"},
+                {"type": "PROJECT_STATUS"},
+            ]
+        )
+
+    elif name == "IGNORE_MAP_ENTRY":
+        name = event["entry-name"]
+        entry = next(
+            item
+            for item in state["model"]["entries"]
+            if item["name"] == name
+        )
+        states = deepcopy(state["model"]["map-entry-states"])
+        states[name] = {
+            "state": "ignored",
+            "kind": entry["kind"],
+            "visual-kind": entry["visual-kind"],
+        }
+        state["model"]["map-entry-states"] = states
+        state["model"]["map-incoming"] = [
+            item
+            for item in state["model"]["map-incoming"]
+            if item["name"] != name
+        ]
+        state["model"]["map-ignored"].append(deepcopy(entry))
+        if state["map-placement-entry"] == name:
+            state["map-placement-entry"] = None
+        state["status"] = f"Ignored {name} on the Directory Map."
+        effects.extend(
+            [
+                {
+                    "type": "WRITE_MAP_ENTRY_STATES",
+                    "folder": state["folder"],
+                    "states": states,
+                },
+                {"type": "PROJECT_INCOMING"},
+                {"type": "PROJECT_STATUS"},
+            ]
+        )
+
+    elif name == "UNIGNORE_MAP_ENTRY":
+        name = event["entry-name"]
+        states = deepcopy(state["model"]["map-entry-states"])
+        states.pop(name, None)
+        entry = next(
+            item
+            for item in state["model"]["map-ignored"]
+            if item["name"] == name
+        )
+        state["model"]["map-entry-states"] = states
+        state["model"]["map-ignored"] = [
+            item
+            for item in state["model"]["map-ignored"]
+            if item["name"] != name
+        ]
+        state["model"]["map-incoming"].append(deepcopy(entry))
+        state["status"] = f"Returned {name} to Incoming."
+        effects.extend(
+            [
+                {
+                    "type": "WRITE_MAP_ENTRY_STATES",
+                    "folder": state["folder"],
+                    "states": states,
+                },
+                {"type": "PROJECT_INCOMING"},
+                {"type": "PROJECT_STATUS"},
+            ]
+        )
+
+    elif name == "REMOVE_MISSING_MAP_ENTRY":
+        name = event["entry-name"]
+        states = deepcopy(state["model"]["map-entry-states"])
+        states.pop(name, None)
+        geometry = deepcopy(state["model"]["map-geometry"])
+        geometry.pop(name, None)
+        z_order = [
+            key
+            for key in state["model"]["map-z-order"]
+            if key != f"entry:{name}"
+        ]
+        state["model"]["map-entry-states"] = states
+        state["model"]["map-geometry"] = geometry
+        state["model"]["map-entries"] = [
+            item
+            for item in state["model"]["map-entries"]
+            if item["name"] != name
+        ]
+        state["model"]["map-z-order"] = z_order
+        state["selected-entry"] = None
+        state["status"] = f"Removed missing map node {name}."
+        effects.extend(
+            [
+                {
+                    "type": "WRITE_MAP_ENTRY_STATES",
+                    "folder": state["folder"],
+                    "states": states,
+                },
+                {
+                    "type": "WRITE_MAP_GEOMETRY",
+                    "folder": state["folder"],
+                    "geometry": geometry,
+                },
+                {
+                    "type": "WRITE_MAP_Z_ORDER",
+                    "folder": state["folder"],
+                    "z-order": z_order,
+                },
+                {"type": "PROJECT_DIRECTORY_MAP"},
+                {"type": "PROJECT_STATUS"},
+            ]
+        )
 
     elif name == "UPSERT_MAP_TEXT":
         texts = deepcopy(state["model"]["map-texts"])

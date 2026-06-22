@@ -31,6 +31,12 @@ The window provides editable path navigation, back/up/refresh controls,
 presentation override, compact folder buttons, Explorer and shell escape
 hatches, and a draggable/resizable Directory Map presentation.
 
+Directory Map treats its layout as a human-authored composition. Newly
+discovered files and folders wait in a fixed Incoming dock until they are
+clicked or dragged into place. Entries may be ignored without altering the
+filesystem. A placed entry that later disappears remains as a removable red
+ghost so the map can remember what was there.
+
 Folders dominated by valid `YYYY-MM-DD` entry names are inferred as Temporal
 Folders. Their Daystream presentation places canonical date folders and dated
 artifacts onto a continuous Monday-first week strip, supplies a month/year

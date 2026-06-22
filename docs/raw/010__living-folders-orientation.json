@@ -1,6 +1,6 @@
 {
   "document": {
-    "document-id": "living-folders.orientation.v0.5",
+    "document-id": "living-folders.orientation.v0.6",
     "title": "Living Folders Orientation",
     "tags": [
       "living-folders",
@@ -70,6 +70,14 @@
       "marquee release commits a mixed group selection across folders, files, text, labelled regions, and images",
       "dragging any member of a group selection moves the whole group without enabling group resize",
       "clicking one item replaces the group with that single selection; clicking empty canvas clears all selection"
+      ,
+      "new immediate filesystem entries wait in a fixed Incoming dock rather than being auto-placed",
+      "clicking an Incoming chip enters placement mode; clicking the map commits one semantic placement event",
+      "an Incoming chip can also be dragged across canvases; only its map-side preview is animated and release commits placement",
+      "Incoming context actions are Place, Open in System, Ignore or Hide, and Open Shell Here only for child folders",
+      "ignored entries can be returned to Incoming through the Ignored dialog",
+      "placed entries missing from disk remain as dim red wireframe ghosts",
+      "Delete on a missing ghost removes its retained map record without filesystem confirmation"
     ],
     "temporal-folder": [
       "Temporal inference activates when at least three immediate entries contain valid YYYY-MM-DD dates and at least half of eligible entries participate",

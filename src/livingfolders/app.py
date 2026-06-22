@@ -27,6 +27,7 @@ from .core import (
     save_buttons,
     save_code_trust,
     save_command_annotations,
+    save_map_entry_states,
     save_map_geometry,
     save_map_images,
     save_map_texts,
@@ -90,6 +91,9 @@ g = {
     "marquee-item": None,
     "marquee-glow-items": [],
     "interaction": None,
+    "dock-drag": None,
+    "placement-preview": None,
+    "incoming-item-entry": {},
     "temporal-selected": None,
     "temporal-cell-items": {},
     "temporal-row-by-date": {},
@@ -362,6 +366,8 @@ def route_effect(effect):
         delete_file_effect(effect)
     elif name == "WRITE_MAP_GEOMETRY":
         save_map_geometry(effect["folder"], effect["geometry"])
+    elif name == "WRITE_MAP_ENTRY_STATES":
+        save_map_entry_states(effect["folder"], effect["states"])
     elif name == "WRITE_MAP_TEXTS":
         save_map_texts(effect["folder"], effect["texts"])
     elif name == "WRITE_MAP_IMAGES":
@@ -373,6 +379,11 @@ def route_effect(effect):
     elif name == "PROJECT_ACTIONS":
         project_actions()
     elif name == "PROJECT_MAP":
+        project_map()
+    elif name == "PROJECT_INCOMING":
+        project_incoming_dock()
+    elif name == "PROJECT_DIRECTORY_MAP":
+        project_incoming_dock()
         project_map()
     elif name == "PROJECT_STATUS":
         project_status()
@@ -457,6 +468,9 @@ def replace_body():
     g["map-image-photos"].clear()
     g["marquee-item"] = None
     g["marquee-glow-items"].clear()
+    g["dock-drag"] = None
+    g["placement-preview"] = None
+    g["incoming-item-entry"].clear()
 
     model = g["state"]["model"]
     if model["active-presentation"] == "directory-map":
@@ -1321,7 +1335,7 @@ def build_directory_map(parent):
     frame = tk.Frame(parent, bg=COLORS["background"])
     frame.grid(row=0, column=0, sticky="nsew")
     frame.columnconfigure(0, weight=1)
-    frame.rowconfigure(1, weight=1)
+    frame.rowconfigure(2, weight=1)
 
     header = tk.Frame(frame, bg=COLORS["background"], padx=12, pady=8)
     header.grid(row=0, column=0, sticky="ew")
@@ -1344,6 +1358,46 @@ def build_directory_map(parent):
         style="Living.TButton",
     ).grid(row=0, column=2, sticky="e", padx=(6, 0))
 
+    dock = tk.Frame(
+        frame,
+        bg=COLORS["panel"],
+        padx=10,
+        pady=7,
+        highlightthickness=1,
+        highlightbackground=COLORS["panel-2"],
+    )
+    dock.grid(row=1, column=0, columnspan=2, sticky="ew")
+    dock.columnconfigure(1, weight=1)
+    tk.Label(
+        dock,
+        text="INCOMING",
+        bg=COLORS["panel"],
+        fg=COLORS["accent"],
+        font=("Segoe UI Semibold", 9),
+    ).grid(row=0, column=0, sticky="w", padx=(0, 10))
+    incoming = tk.Canvas(
+        dock,
+        bg=COLORS["panel"],
+        height=38,
+        highlightthickness=0,
+        cursor="hand2",
+    )
+    incoming.grid(row=0, column=1, sticky="ew")
+    incoming.bind("<ButtonPress-1>", handle_incoming_press)
+    incoming.bind("<B1-Motion>", handle_incoming_motion)
+    incoming.bind("<ButtonRelease-1>", handle_incoming_release)
+    incoming.bind("<Button-3>", handle_incoming_context_menu)
+    ignored = ttk.Button(
+        dock,
+        text="Ignored…",
+        command=open_ignored_entries_dialog,
+        style="Living.TButton",
+    )
+    ignored.grid(row=0, column=2, padx=(8, 0))
+    g["widgets"]["incoming-dock"] = dock
+    g["widgets"]["incoming"] = incoming
+    g["widgets"]["ignored-entries"] = ignored
+
     canvas = tk.Canvas(
         frame,
         bg="#101417",
@@ -1353,9 +1407,9 @@ def build_directory_map(parent):
     xbar = ttk.Scrollbar(frame, orient="horizontal", command=canvas.xview)
     ybar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
     canvas.configure(xscrollcommand=xbar.set, yscrollcommand=ybar.set)
-    canvas.grid(row=1, column=0, sticky="nsew")
-    ybar.grid(row=1, column=1, sticky="ns")
-    xbar.grid(row=2, column=0, sticky="ew")
+    canvas.grid(row=2, column=0, sticky="nsew")
+    ybar.grid(row=2, column=1, sticky="ns")
+    xbar.grid(row=3, column=0, sticky="ew")
     canvas.bind("<ButtonPress-1>", handle_map_press)
     canvas.bind("<B1-Motion>", handle_map_motion)
     canvas.bind("<ButtonRelease-1>", handle_map_release)
@@ -1365,10 +1419,301 @@ def build_directory_map(parent):
     canvas.bind("<Next>", handle_page_down)
     canvas.bind("<Control-v>", handle_paste_image)
     canvas.bind("<Control-V>", handle_paste_image)
+    canvas.bind("<Motion>", handle_map_placement_motion)
+    canvas.bind("<Leave>", clear_placement_preview)
+    canvas.bind("<Escape>", handle_cancel_map_placement)
     canvas.drop_target_register(DND_FILES)
     canvas.dnd_bind("<<Drop>>", handle_image_drop)
     g["widgets"]["map"] = canvas
+    project_incoming_dock()
     project_map()
+
+
+def project_incoming_dock():
+    canvas = g["widgets"].get("incoming")
+    dock = g["widgets"].get("incoming-dock")
+    if not canvas or not canvas.winfo_exists():
+        return
+    incoming = g["state"]["model"]["map-incoming"]
+    ignored = g["state"]["model"]["map-ignored"]
+    if not incoming and not ignored:
+        dock.grid_remove()
+        return
+    dock.grid()
+    g["widgets"]["ignored-entries"].configure(
+        text=f"Ignored ({len(ignored)})…",
+        state="normal" if ignored else "disabled",
+    )
+    canvas.delete("all")
+    g["incoming-item-entry"].clear()
+    x = 2
+    active = g["state"]["map-placement-entry"]
+    for entry in incoming:
+        label = entry["name"] + ("/" if entry["kind"] == "folder" else "")
+        text = canvas.create_text(
+            x + 10,
+            19,
+            text=label,
+            anchor="w",
+            fill=COLORS["text"],
+            font=("Segoe UI Semibold", 9),
+        )
+        bbox = canvas.bbox(text)
+        width = max(72, bbox[2] - bbox[0] + 20)
+        rectangle = canvas.create_rectangle(
+            x,
+            3,
+            x + width,
+            35,
+            fill="#34404a" if active == entry["name"] else COLORS["panel-2"],
+            outline=COLORS["accent"] if active == entry["name"] else "#46515a",
+            width=2 if active == entry["name"] else 1,
+        )
+        canvas.tag_raise(text, rectangle)
+        for item in (rectangle, text):
+            g["incoming-item-entry"][item] = entry["name"]
+        x += width + 7
+    canvas.configure(scrollregion=(0, 0, max(x, canvas.winfo_width()), 38))
+
+
+def open_ignored_entries_dialog():
+    ignored = g["state"]["model"]["map-ignored"]
+    if not ignored:
+        return
+    window = tk.Toplevel(g["tk"])
+    window.title("Ignored Directory Map Entries")
+    window.geometry("560x360")
+    window.transient(g["tk"])
+    window.grab_set()
+    window.configure(bg=COLORS["background"])
+    window.columnconfigure(0, weight=1)
+    window.rowconfigure(1, weight=1)
+    tk.Label(
+        window,
+        text="Ignored entries stay on disk but do not appear in Incoming.",
+        bg=COLORS["background"],
+        fg=COLORS["quiet"],
+        anchor="w",
+    ).grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 8))
+    listbox = tk.Listbox(
+        window,
+        bg=COLORS["panel"],
+        fg=COLORS["text"],
+        selectbackground="#375d78",
+        selectforeground=COLORS["text"],
+        relief="flat",
+        font=("Segoe UI", 10),
+    )
+    listbox.grid(row=1, column=0, sticky="nsew", padx=14)
+    for entry in ignored:
+        listbox.insert("end", entry["name"])
+
+    def restore_selected():
+        selected = listbox.curselection()
+        if not selected:
+            return
+        name = ignored[selected[0]]["name"]
+        window.destroy()
+        dispatch({"type": "UNIGNORE_MAP_ENTRY", "entry-name": name})
+
+    footer = tk.Frame(window, bg=COLORS["background"], padx=14, pady=12)
+    footer.grid(row=2, column=0, sticky="e")
+    ttk.Button(
+        footer,
+        text="Return to Incoming",
+        command=restore_selected,
+        style="Living.TButton",
+    ).grid(row=0, column=0, padx=(0, 8))
+    ttk.Button(
+        footer,
+        text="Close",
+        command=window.destroy,
+        style="Living.TButton",
+    ).grid(row=0, column=1)
+    listbox.bind("<Double-1>", lambda _event: restore_selected())
+
+
+def incoming_entry_at(event):
+    canvas = g["widgets"]["incoming"]
+    items = canvas.find_overlapping(event.x, event.y, event.x, event.y)
+    for item in reversed(items):
+        name = g["incoming-item-entry"].get(item)
+        if name:
+            return find_entry(name)
+    return None
+
+
+def handle_incoming_press(event):
+    entry = incoming_entry_at(event)
+    if not entry:
+        return
+    g["dock-drag"] = {
+        "entry-name": entry["name"],
+        "start-root-x": event.x_root,
+        "start-root-y": event.y_root,
+        "changed": False,
+    }
+
+
+def handle_incoming_motion(event):
+    drag = g["dock-drag"]
+    if not drag:
+        return
+    distance = abs(event.x_root - drag["start-root-x"]) + abs(
+        event.y_root - drag["start-root-y"]
+    )
+    if distance >= 5:
+        drag["changed"] = True
+    if drag["changed"]:
+        update_external_placement_preview(drag["entry-name"])
+
+
+def handle_incoming_release(_event):
+    drag = g["dock-drag"]
+    g["dock-drag"] = None
+    if not drag:
+        return
+    if drag["changed"]:
+        position = pointer_map_position()
+        clear_placement_preview()
+        if position:
+            place_map_entry_at(drag["entry-name"], *position)
+        return
+    dispatch(
+        {
+            "type": "BEGIN_MAP_PLACEMENT",
+            "entry-name": drag["entry-name"],
+        }
+    )
+
+
+def handle_incoming_context_menu(event):
+    entry = incoming_entry_at(event)
+    if not entry:
+        return
+    menu = tk.Menu(
+        g["tk"],
+        tearoff=False,
+        bg=COLORS["panel"],
+        fg=COLORS["text"],
+        activebackground="#375d78",
+        activeforeground=COLORS["text"],
+    )
+    menu.add_command(
+        label="Place",
+        command=lambda: dispatch(
+            {"type": "BEGIN_MAP_PLACEMENT", "entry-name": entry["name"]}
+        ),
+    )
+    menu.add_command(
+        label="Open in System",
+        command=lambda: open_os_path(entry["path"]),
+    )
+    if entry["kind"] == "folder":
+        menu.add_command(
+            label="Open Shell Here",
+            command=lambda: open_shell_at(entry["path"]),
+        )
+    menu.add_separator()
+    menu.add_command(
+        label="Ignore / Hide",
+        command=lambda: dispatch(
+            {"type": "IGNORE_MAP_ENTRY", "entry-name": entry["name"]}
+        ),
+    )
+    menu.tk_popup(event.x_root, event.y_root)
+
+
+def pointer_map_position():
+    canvas = g["widgets"]["map"]
+    pointer_x, pointer_y = canvas.winfo_pointerxy()
+    local_x = pointer_x - canvas.winfo_rootx()
+    local_y = pointer_y - canvas.winfo_rooty()
+    if not (0 <= local_x < canvas.winfo_width()):
+        return None
+    if not (0 <= local_y < canvas.winfo_height()):
+        return None
+    return int(canvas.canvasx(local_x)), int(canvas.canvasy(local_y))
+
+
+def update_external_placement_preview(entry_name):
+    position = pointer_map_position()
+    if not position:
+        clear_placement_preview()
+        return
+    draw_placement_preview(entry_name, *position)
+
+
+def handle_map_placement_motion(event):
+    entry_name = g["state"]["map-placement-entry"]
+    if entry_name:
+        canvas = g["widgets"]["map"]
+        draw_placement_preview(
+            entry_name,
+            int(canvas.canvasx(event.x)),
+            int(canvas.canvasy(event.y)),
+        )
+
+
+def draw_placement_preview(entry_name, x, y):
+    clear_placement_preview()
+    canvas = g["widgets"]["map"]
+    geometry = placement_geometry_at(x, y)
+    rectangle = canvas.create_rectangle(
+        geometry["x"],
+        geometry["y"],
+        geometry["x"] + geometry["width"],
+        geometry["y"] + geometry["height"],
+        fill="#324958",
+        outline="#b8ebff",
+        width=2,
+        dash=(6, 3),
+        stipple="gray50",
+    )
+    text = canvas.create_text(
+        geometry["x"] + 9,
+        geometry["y"] + 9,
+        text=entry_name,
+        anchor="nw",
+        fill="#ffffff",
+        font=("Segoe UI Semibold", 10),
+        width=geometry["width"] - 18,
+    )
+    g["placement-preview"] = [rectangle, text]
+
+
+def clear_placement_preview(_event=None):
+    canvas = g["widgets"].get("map")
+    if canvas:
+        for item in g["placement-preview"] or []:
+            canvas.delete(item)
+    g["placement-preview"] = None
+
+
+def placement_geometry_at(x, y):
+    return {
+        "x": max(0, int(x - 75)),
+        "y": max(0, int(y - 39)),
+        "width": 150,
+        "height": 78,
+    }
+
+
+def place_map_entry_at(entry_name, x, y):
+    dispatch(
+        {
+            "type": "PLACE_MAP_ENTRY",
+            "entry-name": entry_name,
+            "geometry": placement_geometry_at(x, y),
+        }
+    )
+
+
+def handle_cancel_map_placement(_event=None):
+    clear_placement_preview()
+    if g["state"]["map-placement-entry"]:
+        dispatch({"type": "CANCEL_MAP_PLACEMENT"})
+    return "break"
 
 
 def project_map():
@@ -1390,11 +1735,11 @@ def project_map():
     g["marquee-glow-items"].clear()
     model = g["state"]["model"]
 
-    entries = {item["name"]: item for item in model["entries"]}
+    entries = {item["name"]: item for item in model["map-entries"]}
     texts = {item["id"]: item for item in model["map-texts"]}
     images = {item["id"]: item for item in model["map-images"]}
     entry_numbers = {
-        item["name"]: number for number, item in enumerate(model["entries"])
+        item["name"]: number for number, item in enumerate(model["map-entries"])
     }
 
     for key in model["map-z-order"]:
@@ -1420,8 +1765,15 @@ def draw_map_entry(canvas, entry, geometry):
     key = f"entry:{entry['name']}"
     group_selected = key in g["state"]["group-selection"]
     selected = g["state"]["selected-entry"] == entry["name"] or group_selected
-    fill = visual_colors()[entry["visual-kind"]]
-    outline = COLORS["selected"] if selected else "#111111"
+    missing = entry.get("missing") is True
+    fill = "#24282c" if missing else visual_colors()[entry["visual-kind"]]
+    outline = (
+        COLORS["selected"]
+        if selected
+        else "#ff6666"
+        if missing
+        else "#111111"
+    )
     line_width = 3 if selected else 1
 
     rectangle = canvas.create_rectangle(
@@ -1431,14 +1783,15 @@ def draw_map_entry(canvas, entry, geometry):
         y + height,
         fill=fill,
         outline=outline,
-        width=line_width,
+        width=2 if missing and not selected else line_width,
+        dash=(7, 4) if missing else (),
     )
     text = canvas.create_text(
         x + 9,
         y + 9,
-        text=entry["name"],
+        text=f"{entry['name']}\nMISSING" if missing else entry["name"],
         anchor="nw",
-        fill="#101010",
+        fill="#ff9a9a" if missing else "#101010",
         font=("Segoe UI Semibold", 10),
         width=max(40, width - 18),
     )
@@ -1757,6 +2110,11 @@ def handle_map_press(event):
     canvas.focus_set()
     x = canvas.canvasx(event.x)
     y = canvas.canvasy(event.y)
+    if g["state"]["map-placement-entry"]:
+        entry_name = g["state"]["map-placement-entry"]
+        clear_placement_preview()
+        place_map_entry_at(entry_name, x, y)
+        return
     items = canvas.find_overlapping(
         x,
         y,
@@ -2012,7 +2370,17 @@ def handle_map_double_click(event):
                 dispatch({"type": "UPSERT_MAP_TEXT", "text-item": edited})
             return
         if item in g["map-item-entry"]:
-            open_entry_by_name(g["map-item-entry"][item])
+            name = g["map-item-entry"][item]
+            map_entry = find_map_entry(name)
+            if map_entry.get("missing"):
+                dispatch(
+                    {
+                        "type": "SET_STATUS",
+                        "text": f"{name} is no longer present on disk.",
+                    }
+                )
+                return
+            open_entry_by_name(name)
             return
     created = edit_map_text_dialog(
         {
@@ -2355,7 +2723,10 @@ def handle_delete_key(_event=None):
     if not name:
         return
 
-    entry = find_entry(name)
+    entry = find_map_entry(name)
+    if entry.get("missing"):
+        dispatch({"type": "REMOVE_MISSING_MAP_ENTRY", "entry-name": name})
+        return
     if entry["kind"] != "file":
         dispatch(
             {
@@ -2575,6 +2946,13 @@ def find_entry(name):
     raise ValueError(f"Entry is no longer present: {name}")
 
 
+def find_map_entry(name):
+    for entry in g["state"]["model"]["map-entries"]:
+        if entry["name"] == name:
+            return entry
+    raise ValueError(f"Map entry is no longer present: {name}")
+
+
 def open_entry(entry):
     if entry["kind"] == "folder":
         dispatch({"type": "NAVIGATE", "path": entry["path"], "remember": True})
@@ -2607,10 +2985,14 @@ def handle_open_explorer():
 
 
 def handle_open_shell():
+    open_shell_at(g["state"]["folder"])
+
+
+def open_shell_at(path):
     try:
         subprocess.Popen(
             ["powershell"],
-            cwd=g["state"]["folder"],
+            cwd=path,
             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
         )
     except OSError as error:

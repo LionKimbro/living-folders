@@ -17,6 +17,7 @@ from livingfolders.core import (
     save_code_trust,
     save_command_annotations,
     save_map_geometry,
+    save_map_entry_states,
     save_map_images,
     save_map_z_order,
     save_map_texts,
@@ -326,6 +327,75 @@ class FolderModelTests(unittest.TestCase):
             ["2026-02-28"],
             extract_iso_days("bad-2026-02-30_good-2026-02-28.txt"),
         )
+
+    def test_new_directory_map_entries_arrive_in_incoming(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            (folder / "new-notes.md").write_text("hello", encoding="utf-8")
+            (folder / "new-folder").mkdir()
+
+            model = inspect_folder(folder)
+
+            self.assertEqual([], model["map-entries"])
+            self.assertEqual(
+                {"new-notes.md", "new-folder"},
+                {entry["name"] for entry in model["map-incoming"]},
+            )
+
+    def test_placed_ignored_and_missing_map_entries_reconcile(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            placed = folder / "placed.txt"
+            ignored = folder / "ignored.txt"
+            placed.write_text("placed", encoding="utf-8")
+            ignored.write_text("ignored", encoding="utf-8")
+            save_map_entry_states(
+                folder,
+                {
+                    "placed.txt": {
+                        "state": "placed",
+                        "kind": "file",
+                        "visual-kind": "text",
+                    },
+                    "ignored.txt": {
+                        "state": "ignored",
+                        "kind": "file",
+                        "visual-kind": "text",
+                    },
+                },
+            )
+
+            model = inspect_folder(folder)
+            self.assertEqual(["placed.txt"], [item["name"] for item in model["map-entries"]])
+            self.assertEqual([], model["map-incoming"])
+            self.assertEqual(["ignored.txt"], [item["name"] for item in model["map-ignored"]])
+
+            placed.unlink()
+            model = inspect_folder(folder)
+
+            self.assertTrue(model["map-entries"][0]["missing"])
+            self.assertEqual("text", model["map-entries"][0]["visual-kind"])
+
+    def test_legacy_map_geometry_migrates_to_placed_intent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            (folder / "old-map.txt").write_text("old", encoding="utf-8")
+            save_map_geometry(
+                folder,
+                {
+                    "old-map.txt": {
+                        "x": 10,
+                        "y": 20,
+                        "width": 120,
+                        "height": 70,
+                    }
+                },
+            )
+
+            model = inspect_folder(folder)
+
+            self.assertEqual(["old-map.txt"], [item["name"] for item in model["map-entries"]])
+            self.assertEqual("placed", model["map-entry-states"]["old-map.txt"]["state"])
 
 
 if __name__ == "__main__":

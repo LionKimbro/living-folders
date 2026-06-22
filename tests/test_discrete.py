@@ -324,6 +324,127 @@ class DiscreteEngineTests(unittest.TestCase):
         state, _effects = reduce(state, {"type": "CLEAR_SELECTION"})
         self.assertEqual([], state["group-selection"])
 
+    def test_incoming_entry_can_be_placed_through_one_semantic_event(self):
+        state = initial_state()
+        state["folder"] = "C:/map"
+        entry = {
+            "name": "new.txt",
+            "path": "C:/map/new.txt",
+            "kind": "file",
+            "visual-kind": "text",
+            "size": 3,
+            "modified": None,
+        }
+        state["model"] = {
+            "entries": [entry],
+            "map-entry-states": {},
+            "map-entries": [],
+            "map-incoming": [entry],
+            "map-ignored": [],
+            "map-geometry": {},
+            "map-z-order": [],
+        }
+        geometry = {"x": 20, "y": 30, "width": 150, "height": 78}
+
+        state, effects = reduce(
+            state,
+            {
+                "type": "PLACE_MAP_ENTRY",
+                "entry-name": "new.txt",
+                "geometry": geometry,
+            },
+        )
+
+        self.assertEqual("placed", state["model"]["map-entry-states"]["new.txt"]["state"])
+        self.assertEqual([], state["model"]["map-incoming"])
+        self.assertEqual("new.txt", state["model"]["map-entries"][0]["name"])
+        self.assertEqual(geometry, state["model"]["map-geometry"]["new.txt"])
+        self.assertEqual(["entry:new.txt"], state["model"]["map-z-order"])
+        self.assertEqual(
+            [
+                "WRITE_MAP_ENTRY_STATES",
+                "WRITE_MAP_GEOMETRY",
+                "WRITE_MAP_Z_ORDER",
+                "PROJECT_DIRECTORY_MAP",
+                "PROJECT_STATUS",
+            ],
+            [effect["type"] for effect in effects],
+        )
+
+    def test_incoming_entry_can_be_ignored_and_missing_ghost_removed(self):
+        state = initial_state()
+        state["folder"] = "C:/map"
+        entry = {
+            "name": "incoming.txt",
+            "path": "C:/map/incoming.txt",
+            "kind": "file",
+            "visual-kind": "text",
+        }
+        state["model"] = {
+            "entries": [entry],
+            "map-entry-states": {},
+            "map-entries": [],
+            "map-incoming": [entry],
+            "map-ignored": [],
+            "map-geometry": {},
+            "map-z-order": [],
+        }
+
+        state, effects = reduce(
+            state,
+            {"type": "IGNORE_MAP_ENTRY", "entry-name": "incoming.txt"},
+        )
+        self.assertEqual("ignored", state["model"]["map-entry-states"]["incoming.txt"]["state"])
+        self.assertEqual([], state["model"]["map-incoming"])
+        self.assertEqual("WRITE_MAP_ENTRY_STATES", effects[0]["type"])
+
+        state, effects = reduce(
+            state,
+            {"type": "UNIGNORE_MAP_ENTRY", "entry-name": "incoming.txt"},
+        )
+        self.assertNotIn("incoming.txt", state["model"]["map-entry-states"])
+        self.assertEqual(["incoming.txt"], [item["name"] for item in state["model"]["map-incoming"]])
+        self.assertEqual([], state["model"]["map-ignored"])
+
+        state["model"]["map-entry-states"]["gone.txt"] = {
+            "state": "placed",
+            "kind": "file",
+            "visual-kind": "text",
+        }
+        state["model"]["map-entries"] = [
+            {
+                "name": "gone.txt",
+                "path": "C:/map/gone.txt",
+                "kind": "file",
+                "visual-kind": "text",
+                "missing": True,
+            }
+        ]
+        state["model"]["map-geometry"] = {
+            "gone.txt": {"x": 1, "y": 2, "width": 150, "height": 78}
+        }
+        state["model"]["map-z-order"] = ["entry:gone.txt"]
+        state["selected-entry"] = "gone.txt"
+
+        state, effects = reduce(
+            state,
+            {"type": "REMOVE_MISSING_MAP_ENTRY", "entry-name": "gone.txt"},
+        )
+
+        self.assertNotIn("gone.txt", state["model"]["map-entry-states"])
+        self.assertEqual([], state["model"]["map-entries"])
+        self.assertEqual([], state["model"]["map-z-order"])
+        self.assertEqual(
+            [
+                "WRITE_MAP_ENTRY_STATES",
+                "WRITE_MAP_GEOMETRY",
+                "WRITE_MAP_Z_ORDER",
+                "PROJECT_DIRECTORY_MAP",
+                "PROJECT_STATUS",
+            ],
+            [effect["type"] for effect in effects],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
