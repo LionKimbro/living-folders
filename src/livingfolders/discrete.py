@@ -86,6 +86,15 @@ def reduce(state, event):
             }
         )
 
+    elif name == "SAVE_BUTTON_ORDER":
+        effects.append(
+            {
+                "type": "WRITE_BUTTON_ORDER",
+                "folder": state["folder"],
+                "button-order": event["button-order"],
+            }
+        )
+
     elif name == "SAVE_COMMAND_ANNOTATIONS":
         effects.append(
             {

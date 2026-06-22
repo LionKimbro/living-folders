@@ -45,7 +45,8 @@
       "declared navigation and command buttons are stored in .living-folder/description.json",
       "navigation buttons do not require code trust",
       "command buttons and detected runnable files remain disabled until the user explicitly trusts local code",
-      "the button editor adds, edits, and removes navigation or command buttons"
+      "the button editor adds, edits, and removes navigation or command buttons",
+      "small up and down arrow controls, or Control plus Up and Control plus Down, reorder declared and detected buttons together"
     ],
     "directory-map": [
       "immediate directory contents appear as movable and resizable rectangles",

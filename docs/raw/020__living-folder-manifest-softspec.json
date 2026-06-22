@@ -236,6 +236,11 @@
               "type": "array",
               "items": "folder-button"
             },
+            "button-order": {
+              "type": "array",
+              "items": "stable button identity string",
+              "description": "Presentation order shared by declared button:<id> and detected:<filename> controls. Unknown or stale identities are ignored and newly available buttons are appended."
+            },
             "commands": "optional mapped annotations for detected runnable filenames",
             "directory-map": {
               "type": "object",

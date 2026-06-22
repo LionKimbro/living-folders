@@ -72,6 +72,12 @@ def inspect_folder(path):
     explicit = normalize_optional_mode(raw.get("presentation-mode"))
     buttons = normalize_buttons(raw)
     command_annotations = normalize_command_annotations(raw)
+    detected_buttons = detect_runnable_buttons(
+        folder,
+        entries,
+        command_annotations,
+    )
+    button_order = normalize_button_order(raw, buttons, detected_buttons)
     geometry = normalize_map_geometry(raw)
     map_texts = normalize_map_texts(raw)
     map_images = normalize_map_images(raw)
@@ -93,12 +99,14 @@ def inspect_folder(path):
         "active-presentation": explicit or inferred,
         "trust-runnable-code": raw.get("trust-runnable-code") is True,
         "buttons": buttons,
-        "command-annotations": command_annotations,
-        "detected-buttons": detect_runnable_buttons(
-            folder,
-            entries,
-            command_annotations,
+        "button-order": button_order,
+        "ordered-buttons": order_folder_buttons(
+            buttons,
+            detected_buttons,
+            button_order,
         ),
+        "command-annotations": command_annotations,
+        "detected-buttons": detected_buttons,
         "map-geometry": geometry,
         "map-entry-states": map_entry_states,
         "map-entries": map_entries,
@@ -433,6 +441,44 @@ def normalize_command_annotations(raw):
     return annotations
 
 
+def folder_button_key(button):
+    if button.get("source") == "detected":
+        return f"detected:{button['filename']}"
+    return f"button:{button['id']}"
+
+
+def normalize_button_order(raw, buttons, detected_buttons):
+    source = raw.get("button-order", [])
+    if not isinstance(source, list):
+        raise ValueError("manifest.button-order must be an array.")
+    available = [
+        folder_button_key(button)
+        for button in buttons + detected_buttons
+    ]
+    available_set = set(available)
+    ordered = []
+    for value in source:
+        key = str(value)
+        if key in available_set and key not in ordered:
+            ordered.append(key)
+    for key in available:
+        if key not in ordered:
+            ordered.append(key)
+    return ordered
+
+
+def order_folder_buttons(buttons, detected_buttons, button_order):
+    by_key = {
+        folder_button_key(button): button
+        for button in buttons + detected_buttons
+    }
+    return [
+        by_key[key]
+        for key in button_order
+        if key in by_key
+    ]
+
+
 def normalize_map_geometry(raw):
     section = raw.get("directory-map", {})
     if not isinstance(section, dict):
@@ -732,6 +778,13 @@ def save_buttons(folder, buttons):
     _path, raw = read_manifest(normalize_folder_path(folder))
     raw["buttons"] = buttons
     raw.pop("actions", None)
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
+def save_button_order(folder, button_order):
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    raw["button-order"] = [str(key) for key in button_order]
     ensure_manifest_identity(raw, folder)
     return write_manifest(folder, raw)
 

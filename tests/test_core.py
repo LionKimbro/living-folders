@@ -14,6 +14,8 @@ from livingfolders.core import (
     import_clipboard_image,
     import_image_file,
     inspect_folder,
+    save_button_order,
+    save_buttons,
     save_code_trust,
     save_command_annotations,
     save_map_geometry,
@@ -78,6 +80,45 @@ class FolderModelTests(unittest.TestCase):
             self.assertEqual("..", buttons[0]["target"])
             self.assertEqual("command", buttons[1]["kind"])
             self.assertEqual("git status", buttons[1]["command"])
+
+    def test_declared_and_detected_buttons_share_one_persistent_order(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            (folder / "run.bat").write_text("@echo off\n", encoding="utf-8")
+            save_buttons(
+                folder,
+                [
+                    {
+                        "id": "first",
+                        "kind": "navigate",
+                        "label": "First",
+                        "description": "",
+                        "target": "..",
+                    },
+                    {
+                        "id": "second",
+                        "kind": "navigate",
+                        "label": "Second",
+                        "description": "",
+                        "target": ".",
+                    },
+                ],
+            )
+            save_button_order(
+                folder,
+                [
+                    "button:second",
+                    "detected:run.bat",
+                    "button:first",
+                ],
+            )
+
+            model = inspect_folder(folder)
+
+            self.assertEqual(
+                ["Second", "Run", "First"],
+                [button["label"] for button in model["ordered-buttons"]],
+            )
 
     def test_writes_are_atomic_and_preserve_unknown_fields(self):
         with tempfile.TemporaryDirectory() as temporary:

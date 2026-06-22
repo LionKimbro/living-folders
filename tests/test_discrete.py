@@ -111,6 +111,29 @@ class DiscreteEngineTests(unittest.TestCase):
             effects,
         )
 
+    def test_button_order_is_an_explicit_persistence_effect(self):
+        state = initial_state()
+        state["folder"] = "C:/buttons"
+
+        _state, effects = reduce(
+            state,
+            {
+                "type": "SAVE_BUTTON_ORDER",
+                "button-order": ["button:second", "button:first"],
+            },
+        )
+
+        self.assertEqual(
+            [
+                {
+                    "type": "WRITE_BUTTON_ORDER",
+                    "folder": "C:/buttons",
+                    "button-order": ["button:second", "button:first"],
+                }
+            ],
+            effects,
+        )
+
     def test_map_text_can_be_created_and_moved(self):
         state = initial_state()
         state["folder"] = "C:/map"

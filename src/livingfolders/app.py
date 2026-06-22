@@ -18,6 +18,7 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 from .core import (
     PRESENTATION_MODES,
     delete_immediate_file,
+    folder_button_key,
     get_cached_image_path,
     import_clipboard_image,
     import_image_file,
@@ -25,6 +26,7 @@ from .core import (
     resolve_image_asset_path,
     resolve_navigation_target,
     save_buttons,
+    save_button_order,
     save_code_trust,
     save_command_annotations,
     save_map_entry_states,
@@ -359,6 +361,9 @@ def route_effect(effect):
     elif name == "WRITE_BUTTONS":
         save_buttons(effect["folder"], effect["buttons"])
         dispatch({"type": "REFRESH"})
+    elif name == "WRITE_BUTTON_ORDER":
+        save_button_order(effect["folder"], effect["button-order"])
+        dispatch({"type": "REFRESH"})
     elif name == "WRITE_COMMAND_ANNOTATIONS":
         save_command_annotations(effect["folder"], effect["annotations"])
         dispatch({"type": "REFRESH"})
@@ -548,7 +553,7 @@ def build_temporal_view(parent):
     frame.columnconfigure(0, weight=1)
     model = g["state"]["model"]
     temporal = model["temporal"]
-    buttons = model["buttons"] + model["detected-buttons"]
+    buttons = model["ordered-buttons"]
 
     header_row = 0
     if buttons:
@@ -1310,7 +1315,7 @@ def project_actions(show_empty_message=True):
         child.destroy()
 
     model = g["state"]["model"]
-    buttons = model["buttons"] + model["detected-buttons"]
+    buttons = model["ordered-buttons"]
     for number, button in enumerate(buttons):
         widget = ttk.Button(
             actions,
@@ -3045,23 +3050,57 @@ def open_button_editor():
         filename: dict(note)
         for filename, note in g["state"]["model"]["command-annotations"].items()
     }
-    rows = []
+    available_rows = {
+        folder_button_key(item): ("declared", item)
+        for item in buttons
+    }
+    available_rows.update(
+        {
+            folder_button_key(item): ("detected", item)
+            for item in detected
+        }
+    )
+    rows = [
+        available_rows[key]
+        for key in g["state"]["model"]["button-order"]
+        if key in available_rows
+    ]
     listbox = tk.Listbox(window, font=("Segoe UI", 10))
-    listbox.grid(row=0, column=0, columnspan=5, sticky="nsew", padx=12, pady=12)
+    listbox.grid(row=0, column=0, columnspan=5, sticky="nsew", padx=(12, 4), pady=12)
 
-    def refresh_list():
-        rows.clear()
+    reorder = tk.Frame(window)
+    reorder.grid(row=0, column=5, sticky="ns", padx=(4, 12), pady=12)
+
+    def refresh_list(selected_index=None):
         listbox.delete(0, "end")
-        for item in buttons:
-            rows.append(("declared", item))
-            detail = item.get("target", item.get("command", ""))
-            listbox.insert("end", f"{item['label']}  [{item['kind']}]  {detail}")
-        for item in detected:
-            rows.append(("detected", item))
-            listbox.insert(
-                "end",
-                f"{item['label']}  [detected executable]  {item['filename']}",
-            )
+        for source, item in rows:
+            if source == "detected":
+                text = (
+                    f"{item['label']}  [detected executable]  "
+                    f"{item['filename']}"
+                )
+            else:
+                detail = item.get("target", item.get("command", ""))
+                text = f"{item['label']}  [{item['kind']}]  {detail}"
+            listbox.insert("end", text)
+        if selected_index is not None and rows:
+            selected_index = max(0, min(selected_index, len(rows) - 1))
+            listbox.selection_set(selected_index)
+            listbox.activate(selected_index)
+            listbox.see(selected_index)
+            listbox.focus_set()
+
+    def move_selected(direction):
+        selection = listbox.curselection()
+        if not selection:
+            return "break"
+        index = selection[0]
+        target = index + direction
+        if not 0 <= target < len(rows):
+            return "break"
+        rows[index], rows[target] = rows[target], rows[index]
+        refresh_list(target)
+        return "break"
 
     def add_navigation():
         target = filedialog.askdirectory(
@@ -3078,16 +3117,16 @@ def open_button_editor():
             initialvalue=Path(target).name,
         )
         if label:
-            buttons.append(
-                {
-                    "id": new_button_id(),
-                    "kind": "navigate",
-                    "label": label,
-                    "description": "",
-                    "target": target,
-                }
-            )
-            refresh_list()
+            item = {
+                "id": new_button_id(),
+                "kind": "navigate",
+                "label": label,
+                "description": "",
+                "target": target,
+            }
+            buttons.append(item)
+            rows.append(("declared", item))
+            refresh_list(len(rows) - 1)
 
     def add_command():
         label = simpledialog.askstring("Button label", "Label:", parent=window)
@@ -3099,16 +3138,16 @@ def open_button_editor():
             parent=window,
         )
         if command:
-            buttons.append(
-                {
-                    "id": new_button_id(),
-                    "kind": "command",
-                    "label": label,
-                    "description": "",
-                    "command": command,
-                }
-            )
-            refresh_list()
+            item = {
+                "id": new_button_id(),
+                "kind": "command",
+                "label": label,
+                "description": "",
+                "command": command,
+            }
+            buttons.append(item)
+            rows.append(("declared", item))
+            refresh_list(len(rows) - 1)
 
     def edit_selected():
         selection = listbox.curselection()
@@ -3132,7 +3171,7 @@ def open_button_editor():
             note.pop("hidden", None)
             annotations[item["filename"]] = note
             item["label"] = label
-            refresh_list()
+            refresh_list(selection[0])
             return
         key = "target" if item["kind"] == "navigate" else "command"
         value = simpledialog.askstring(
@@ -3145,13 +3184,14 @@ def open_button_editor():
             return
         item["label"] = label
         item[key] = value
-        refresh_list()
+        refresh_list(selection[0])
 
     def delete_selected():
         selection = listbox.curselection()
         if not selection:
             return
         source, item = rows[selection[0]]
+        index = selection[0]
         if source == "detected":
             note = annotations.get(item["filename"], {})
             if isinstance(note, str):
@@ -3162,17 +3202,49 @@ def open_button_editor():
             detected.remove(item)
         else:
             buttons.remove(item)
-        refresh_list()
+        rows.pop(index)
+        refresh_list(min(index, len(rows) - 1))
 
     def save_and_close():
-        dispatch({"type": "SAVE_BUTTONS", "buttons": buttons})
+        ordered_declared = [
+            item
+            for source, item in rows
+            if source == "declared"
+        ]
+        dispatch({"type": "SAVE_BUTTONS", "buttons": ordered_declared})
         dispatch(
             {
                 "type": "SAVE_COMMAND_ANNOTATIONS",
                 "annotations": annotations,
             }
         )
+        dispatch(
+            {
+                "type": "SAVE_BUTTON_ORDER",
+                "button-order": [
+                    folder_button_key(item)
+                    for _source, item in rows
+                ],
+            }
+        )
         window.destroy()
+
+    ttk.Button(
+        reorder,
+        text="↑",
+        width=3,
+        command=lambda: move_selected(-1),
+        style="Living.TButton",
+    ).grid(row=0, column=0, pady=(0, 5))
+    ttk.Button(
+        reorder,
+        text="↓",
+        width=3,
+        command=lambda: move_selected(1),
+        style="Living.TButton",
+    ).grid(row=1, column=0)
+    listbox.bind("<Control-Up>", lambda _event: move_selected(-1))
+    listbox.bind("<Control-Down>", lambda _event: move_selected(1))
 
     controls = [
         ("＋ Navigation", add_navigation),
