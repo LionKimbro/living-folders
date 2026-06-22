@@ -1,6 +1,6 @@
 {
   "document": {
-    "document-id": "living-folders.orientation.v0.3",
+    "document-id": "living-folders.orientation.v0.4",
     "title": "Living Folders Orientation",
     "tags": [
       "living-folders",
@@ -80,6 +80,18 @@
     "continuity": "Tk pointer callbacks own in-progress map move and resize previews. Only release emits committed semantic meaning.",
     "projection": "Tk widgets and canvas items are downstream renderings and do not decide semantic truth.",
     "effects": "Folder reads, atomic JSON writes, process launches, and OS opening occur outside the reducer."
+  },
+  "machine-runtime": {
+    "machine-root-key": "living-folders-runtime",
+    "configured-value": "C:\\lion\\installed\\living-folders",
+    "launcher-directory-key": "path-dir",
+    "launcher-directory-purpose": "A shared directory on PATH into which install-launcher writes living-folders.pyw.",
+    "lock": "A Windows named mutex is the hard single-instance lock. lock-file.json is the inspectable PID, instance, and window-handle record.",
+    "summons": "A launcher writes atomic summon messages into inbox/. The resident application polls once per second, foregrounds itself, and deletes handled messages.",
+    "launcher": "<path-dir>\\living-folders.pyw",
+    "launcher-install-command": "living-folders install-launcher",
+    "launcher-folder-argument": "living-folders.pyw [folder] starts in that folder or redirects the resident instance to it through the summons inbox.",
+    "lionscliapp": "The CLI remains built with lionscliapp, but its execution root is moved to the Machine Root runtime home before framework startup. The requested folder is captured as an absolute path first. Single-instance identity does not depend on the lionscliapp project directory."
   },
   "commands": {
     "open": "living-folders --execpath.folder <folder>",

@@ -32,3 +32,36 @@ presentation override, compact folder buttons, Explorer and shell escape
 hatches, and a draggable/resizable Directory Map presentation.
 
 The fuller orientation and manifest SoftSpec live in `docs/raw/`.
+
+## Machine-wide runtime
+
+Machine Root must define:
+
+```text
+living-folders-runtime = C:\lion\installed\living-folders
+path-dir = C:\bin
+```
+
+This directory owns the single-instance `lock-file.json`, FileTalk-style
+`inbox/`, and the isolated lionscliapp configuration directory. The launcher
+is installed into `path-dir` by:
+
+```powershell
+living-folders install-launcher
+```
+
+Invoking `living-folders.pyw` starts Living Folders or summons the existing
+window.
+
+An optional folder redirects the resident window:
+
+```powershell
+living-folders.pyw "C:\lion\github"
+```
+
+The development installation currently uses:
+
+```powershell
+python -m pip install -e C:\lion\github\living-folders
+living-folders install-launcher
+```

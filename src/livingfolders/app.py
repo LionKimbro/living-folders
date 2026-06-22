@@ -33,6 +33,7 @@ from .core import (
     save_presentation,
 )
 from .discrete import initial_state, reduce
+from . import runtime
 
 
 COLORS = {
@@ -85,23 +86,36 @@ g = {
     "map-image-handles": set(),
     "map-image-photos": {},
     "interaction": None,
+    "instance": None,
 }
 
 
 def run(path):
     """Create the two-thread Tkinter application and open the requested folder."""
-    build_window()
-    start_worker()
-    dispatch({"type": "NAVIGATE", "path": str(path), "remember": False})
-    poll_worker_results()
-    g["tk"].deiconify()
-    g["tk"].mainloop()
+    instance = runtime.acquire_instance()
+    if instance is None:
+        runtime.send_summons(path)
+        return
+
+    g["instance"] = instance
+    try:
+        build_window()
+        runtime.publish_window_handle(instance, g["tk"].winfo_id())
+        start_worker()
+        dispatch({"type": "NAVIGATE", "path": str(path), "remember": False})
+        poll_worker_results()
+        poll_runtime_inbox()
+        g["tk"].deiconify()
+        g["tk"].mainloop()
+    finally:
+        runtime.release_instance(instance)
+        g["instance"] = None
 
 
 def build_window():
     root = TkinterDnD.Tk()
     root.withdraw()
-    root.title("Living Folders")
+    root.title(f"Living Folders  [{runtime.WINDOW_TOKEN}]")
     root.geometry("1240x820")
     root.minsize(860, 600)
     root.option_add("*tearOff", 0)
@@ -370,6 +384,8 @@ def project_everything():
     g["projecting"] = True
     model = g["state"]["model"]
     path = model["folder"]
+    if g["instance"]:
+        runtime.publish_current_folder(g["instance"], path)
     g["widgets"]["path-var"].set(path)
     g["widgets"]["back"].configure(
         state="normal" if g["state"]["back-stack"] else "disabled"
@@ -1788,6 +1804,34 @@ def poll_worker_results():
         dispatch({"type": "SET_STATUS", "text": status})
     if not g["closing"]:
         g["tk"].after(100, poll_worker_results)
+
+
+def poll_runtime_inbox():
+    messages = runtime.consume_summons()
+    if messages:
+        requested = [
+            message["requested-folder"]
+            for message in messages
+            if message.get("requested-folder")
+        ]
+        if requested:
+            dispatch(
+                {
+                    "type": "NAVIGATE",
+                    "path": requested[-1],
+                    "remember": True,
+                }
+            )
+        runtime.bring_window_to_front(g["tk"])
+        if not requested:
+            dispatch(
+                {
+                    "type": "SET_STATUS",
+                    "text": "Living Folders was summoned to the foreground.",
+                }
+            )
+    if not g["closing"]:
+        g["tk"].after(1000, poll_runtime_inbox)
 
 
 def show_command_output():
