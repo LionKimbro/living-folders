@@ -79,6 +79,7 @@ g = {
     "map-handles": set(),
     "map-text-items": {},
     "map-item-text-id": {},
+    "map-text-handles": set(),
     "map-image-items": {},
     "map-item-image-id": {},
     "map-image-handles": set(),
@@ -407,6 +408,7 @@ def replace_body():
     g["map-handles"].clear()
     g["map-text-items"].clear()
     g["map-item-text-id"].clear()
+    g["map-text-handles"].clear()
     g["map-image-items"].clear()
     g["map-item-image-id"].clear()
     g["map-image-handles"].clear()
@@ -572,6 +574,7 @@ def project_map():
     g["map-handles"].clear()
     g["map-text-items"].clear()
     g["map-item-text-id"].clear()
+    g["map-text-handles"].clear()
     g["map-image-items"].clear()
     g["map-item-image-id"].clear()
     g["map-image-handles"].clear()
@@ -643,18 +646,103 @@ def draw_map_entry(canvas, entry, geometry):
 
 
 def draw_map_text(canvas, text_item):
-    item = canvas.create_text(
-        text_item["x"],
-        text_item["y"],
+    if not text_item["labelled-region"]:
+        item = canvas.create_text(
+            text_item["x"],
+            text_item["y"],
+            text=text_item["text"],
+            anchor="nw",
+            justify=text_item["alignment"],
+            width=420,
+            fill=map_text_color(text_item["color"]),
+            font=("Segoe UI", map_text_font_size(text_item["font-size"])),
+        )
+        items = [item]
+    else:
+        items = draw_labelled_region(canvas, text_item)
+
+    g["map-text-items"][text_item["id"]] = items
+    for item in items:
+        g["map-item-text-id"][item] = text_item["id"]
+
+
+def draw_labelled_region(canvas, text_item):
+    x = text_item["x"]
+    y = text_item["y"]
+    width = text_item["width"]
+    height = text_item["height"]
+    color = map_text_color(text_item["color"])
+    line_color = color
+    line_width = 1 if text_item["region-line-width"] == "thin" else 2
+    label_x, anchor = labelled_region_label_position(text_item)
+
+    label = canvas.create_text(
+        label_x,
+        y,
         text=text_item["text"],
-        anchor="nw",
+        anchor=anchor,
         justify=text_item["alignment"],
-        width=420,
-        fill=map_text_color(text_item["color"]),
+        width=max(40, width - 24),
+        fill=color,
         font=("Segoe UI", map_text_font_size(text_item["font-size"])),
     )
-    g["map-text-items"][text_item["id"]] = item
-    g["map-item-text-id"][item] = text_item["id"]
+    bbox = canvas.bbox(label)
+    label_left = max(x, bbox[0] - 7)
+    label_right = min(x + width, bbox[2] + 7)
+    top_y = int((bbox[1] + bbox[3]) / 2)
+    bottom_y = y + height
+
+    left = canvas.create_line(x, top_y, x, bottom_y, fill=line_color, width=line_width)
+    right = canvas.create_line(
+        x + width,
+        top_y,
+        x + width,
+        bottom_y,
+        fill=line_color,
+        width=line_width,
+    )
+    bottom = canvas.create_line(
+        x,
+        bottom_y,
+        x + width,
+        bottom_y,
+        fill=line_color,
+        width=line_width,
+    )
+    top_left = canvas.create_line(
+        x,
+        top_y,
+        label_left,
+        top_y,
+        fill=line_color,
+        width=line_width,
+    )
+    top_right = canvas.create_line(
+        label_right,
+        top_y,
+        x + width,
+        top_y,
+        fill=line_color,
+        width=line_width,
+    )
+    handle = canvas.create_rectangle(
+        x + width - 14,
+        bottom_y - 14,
+        x + width,
+        bottom_y,
+        fill=line_color,
+        outline="#111111",
+    )
+    g["map-text-handles"].add(handle)
+    return [left, right, bottom, top_left, top_right, label, handle]
+
+
+def labelled_region_label_position(text_item):
+    if text_item["alignment"] == "center":
+        return text_item["x"] + text_item["width"] / 2, "n"
+    if text_item["alignment"] == "right":
+        return text_item["x"] + text_item["width"] - 12, "ne"
+    return text_item["x"] + 12, "nw"
 
 
 def draw_map_image(canvas, image_item):
@@ -739,16 +827,17 @@ def handle_map_press(event):
     if text_items:
         item = text_items[0]
         text_id = g["map-item-text-id"][item]
+        is_resize = item in g["map-text-handles"]
         dispatch({"type": "SELECT_MAP_TEXT", "text-id": text_id})
-        item = g["map-text-items"][text_id]
-        x, y = canvas.coords(item)
+        geometry = current_canvas_text_geometry(text_id)
         g["interaction"] = {
             "kind": "text",
             "text-id": text_id,
+            "mode": "resize" if is_resize else "move",
             "start-x": canvas.canvasx(event.x),
             "start-y": canvas.canvasy(event.y),
-            "origin": {"x": int(x), "y": int(y)},
-            "preview": {"x": int(x), "y": int(y)},
+            "origin": geometry,
+            "preview": geometry.copy(),
             "changed": False,
         }
         return
@@ -782,17 +871,21 @@ def handle_map_motion(event):
     origin = interaction["origin"]
 
     if interaction["kind"] == "text":
-        preview = {
-            "x": max(0, int(origin["x"] + dx)),
-            "y": max(0, int(origin["y"] + dy)),
-        }
+        if interaction["mode"] == "resize":
+            preview = {
+                **origin,
+                "width": max(120, int(origin["width"] + dx)),
+                "height": max(70, int(origin["height"] + dy)),
+            }
+        else:
+            preview = {
+                **origin,
+                "x": max(0, int(origin["x"] + dx)),
+                "y": max(0, int(origin["y"] + dy)),
+            }
         interaction["preview"] = preview
         interaction["changed"] = True
-        canvas.coords(
-            g["map-text-items"][interaction["text-id"]],
-            preview["x"],
-            preview["y"],
-        )
+        position_canvas_text(interaction["text-id"], preview)
         return
 
     if interaction["kind"] == "image":
@@ -839,10 +932,9 @@ def handle_map_release(_event):
         if interaction["changed"]:
             dispatch(
                 {
-                    "type": "MAP_TEXT_MOVED",
+                    "type": "MAP_TEXT_GEOMETRY_COMMITTED",
                     "text-id": interaction["text-id"],
-                    "x": interaction["preview"]["x"],
-                    "y": interaction["preview"]["y"],
+                    "geometry": interaction["preview"],
                 }
             )
         return
@@ -906,6 +998,10 @@ def handle_map_double_click(event):
             "alignment": "left",
             "font-size": "medium",
             "color": "white",
+            "labelled-region": False,
+            "region-line-width": "thick",
+            "width": 320,
+            "height": 180,
         }
     )
     if created and created["text"].strip():
@@ -999,13 +1095,19 @@ def edit_map_text_dialog(text_item):
     result = {"value": None}
     window = tk.Toplevel(g["tk"])
     window.title("Map Text")
-    window.geometry("620x430")
+    window.geometry("640x470")
     window.transient(g["tk"])
     window.grab_set()
+    window.configure(bg=COLORS["background"])
     window.columnconfigure(0, weight=1)
     window.rowconfigure(1, weight=1)
 
-    ttk.Label(window, text="Text to place on the directory map:").grid(
+    tk.Label(
+        window,
+        text="Text to place on the directory map:",
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+    ).grid(
         row=0,
         column=0,
         sticky="w",
@@ -1018,11 +1120,21 @@ def edit_map_text_dialog(text_item):
         height=12,
         font=("Segoe UI", 11),
         undo=True,
+        bg=COLORS["panel"],
+        fg=COLORS["text"],
+        insertbackground=COLORS["text"],
+        selectbackground="#375d78",
+        relief="flat",
+        padx=10,
+        pady=8,
+        highlightthickness=1,
+        highlightbackground=COLORS["panel-2"],
+        highlightcolor=COLORS["accent"],
     )
     editor.grid(row=1, column=0, sticky="nsew", padx=14)
     editor.insert("1.0", text_item["text"])
 
-    choices = ttk.Frame(window, padding=(14, 12))
+    choices = tk.Frame(window, bg=COLORS["background"], padx=14, pady=12)
     choices.grid(row=2, column=0, sticky="ew")
     choices.columnconfigure(0, weight=1)
     choices.columnconfigure(1, weight=1)
@@ -1031,6 +1143,8 @@ def edit_map_text_dialog(text_item):
     alignment = tk.StringVar(value=text_item["alignment"])
     size = tk.StringVar(value=text_item["font-size"])
     color = tk.StringVar(value=text_item["color"])
+    labelled_region = tk.BooleanVar(value=text_item["labelled-region"])
+    region_line_width = tk.StringVar(value=text_item["region-line-width"])
 
     add_radio_group(
         choices,
@@ -1054,8 +1168,53 @@ def edit_map_text_dialog(text_item):
         [("White", "white"), ("Green", "green"), ("Blue", "blue"), ("Red", "red")],
     )
 
-    buttons = ttk.Frame(window, padding=(14, 0, 14, 14))
-    buttons.grid(row=3, column=0, sticky="e")
+    region_row = tk.Frame(
+        window,
+        bg=COLORS["background"],
+        padx=14,
+        pady=4,
+    )
+    region_row.grid(row=3, column=0, sticky="w")
+    tk.Checkbutton(
+        region_row,
+        text="Labelled Region",
+        variable=labelled_region,
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+        activebackground=COLORS["background"],
+        activeforeground=COLORS["text"],
+        selectcolor=COLORS["panel-2"],
+    ).grid(row=0, column=0, sticky="w")
+    tk.Radiobutton(
+        region_row,
+        text="Thin",
+        value="thin",
+        variable=region_line_width,
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+        activebackground=COLORS["background"],
+        activeforeground=COLORS["text"],
+        selectcolor=COLORS["panel-2"],
+    ).grid(row=0, column=1, sticky="w", padx=(24, 4))
+    tk.Radiobutton(
+        region_row,
+        text="Thick",
+        value="thick",
+        variable=region_line_width,
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+        activebackground=COLORS["background"],
+        activeforeground=COLORS["text"],
+        selectcolor=COLORS["panel-2"],
+    ).grid(row=0, column=2, sticky="w", padx=(4, 0))
+
+    buttons = tk.Frame(
+        window,
+        bg=COLORS["background"],
+        padx=14,
+        pady=14,
+    )
+    buttons.grid(row=4, column=0, sticky="e")
 
     def accept():
         updated = dict(text_item)
@@ -1063,6 +1222,10 @@ def edit_map_text_dialog(text_item):
         updated["alignment"] = alignment.get()
         updated["font-size"] = size.get()
         updated["color"] = color.get()
+        updated["labelled-region"] = labelled_region.get()
+        updated["region-line-width"] = region_line_width.get()
+        updated.setdefault("width", 320)
+        updated.setdefault("height", 180)
         result["value"] = updated
         window.destroy()
 
@@ -1087,14 +1250,28 @@ def edit_map_text_dialog(text_item):
 
 
 def add_radio_group(parent, column, title, variable, choices):
-    frame = ttk.LabelFrame(parent, text=title, padding=8)
+    frame = tk.LabelFrame(
+        parent,
+        text=title,
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+        padx=8,
+        pady=8,
+        highlightbackground=COLORS["panel-2"],
+        highlightcolor=COLORS["panel-2"],
+    )
     frame.grid(row=0, column=column, sticky="nsew", padx=(0, 8))
     for row, (label, value) in enumerate(choices):
-        ttk.Radiobutton(
+        tk.Radiobutton(
             frame,
             text=label,
             value=value,
             variable=variable,
+            bg=COLORS["background"],
+            fg=COLORS["text"],
+            activebackground=COLORS["background"],
+            activeforeground=COLORS["text"],
+            selectcolor=COLORS["panel-2"],
         ).grid(row=row, column=0, sticky="w")
 
 
@@ -1217,6 +1394,23 @@ def current_canvas_geometry(name):
     }
 
 
+def current_canvas_text_geometry(text_id):
+    text_item = find_map_text(text_id)
+    if text_item["labelled-region"]:
+        return {
+            "x": text_item["x"],
+            "y": text_item["y"],
+            "width": text_item["width"],
+            "height": text_item["height"],
+        }
+    return {
+        "x": text_item["x"],
+        "y": text_item["y"],
+        "width": text_item["width"],
+        "height": text_item["height"],
+    }
+
+
 def current_canvas_image_geometry(image_id):
     canvas = g["widgets"]["map"]
     border = g["map-image-items"][image_id][0]
@@ -1246,6 +1440,17 @@ def position_canvas_entry(name, geometry):
         x + width,
         y + height,
     )
+
+
+def position_canvas_text(text_id, geometry):
+    text_item = find_map_text(text_id)
+    text_item.update(geometry)
+    canvas = g["widgets"]["map"]
+    for item in g["map-text-items"][text_id]:
+        canvas.delete(item)
+        g["map-item-text-id"].pop(item, None)
+        g["map-text-handles"].discard(item)
+    draw_map_text(canvas, text_item)
 
 
 def position_canvas_image(image_id, geometry):

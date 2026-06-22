@@ -99,7 +99,17 @@
               "blue": "Blue text.",
               "red": "Red text."
             }
-          }
+          },
+          "labelled-region": "boolean; when true, render the text as a label interrupting the top border of a resizable empty region",
+          "region-line-width": {
+            "type": "string",
+            "vocabulary": {
+              "thin": "Draw the region outline one pixel thick.",
+              "thick": "Draw the region outline two pixels thick."
+            }
+          },
+          "width": "integer region width; meaningful when labelled-region is true",
+          "height": "integer region height; meaningful when labelled-region is true"
         },
         "additional_keys": true
       },

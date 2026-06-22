@@ -316,6 +316,9 @@ def normalize_map_texts(raw):
             size = "medium"
         if color not in {"white", "green", "blue", "red"}:
             color = "white"
+        line_width = str(value.get("region-line-width", "thick")).lower()
+        if line_width not in {"thin", "thick"}:
+            line_width = "thick"
         texts.append(
             {
                 "id": str(value.get("id", uuid.uuid4())),
@@ -325,6 +328,10 @@ def normalize_map_texts(raw):
                 "alignment": alignment,
                 "font-size": size,
                 "color": color,
+                "labelled-region": value.get("labelled-region") is True,
+                "region-line-width": line_width,
+                "width": max(120, int(value.get("width", 320))),
+                "height": max(70, int(value.get("height", 180))),
             }
         )
     return texts

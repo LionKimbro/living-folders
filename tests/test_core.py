@@ -171,6 +171,10 @@ class FolderModelTests(unittest.TestCase):
                     "alignment": "center",
                     "font-size": "large",
                     "color": "green",
+                    "labelled-region": False,
+                    "region-line-width": "thick",
+                    "width": 320,
+                    "height": 180,
                 }
             ]
 

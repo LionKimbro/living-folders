@@ -123,6 +123,10 @@ class DiscreteEngineTests(unittest.TestCase):
             "alignment": "left",
             "font-size": "medium",
             "color": "white",
+            "labelled-region": False,
+            "region-line-width": "thick",
+            "width": 320,
+            "height": 180,
         }
 
         state, effects = reduce(
@@ -136,7 +140,16 @@ class DiscreteEngineTests(unittest.TestCase):
 
         state, effects = reduce(
             state,
-            {"type": "MAP_TEXT_MOVED", "text-id": "note-1", "x": 90, "y": 110},
+            {
+                "type": "MAP_TEXT_GEOMETRY_COMMITTED",
+                "text-id": "note-1",
+                "geometry": {
+                    "x": 90,
+                    "y": 110,
+                    "width": 320,
+                    "height": 180,
+                },
+            },
         )
 
         self.assertEqual(90, state["model"]["map-texts"][0]["x"])

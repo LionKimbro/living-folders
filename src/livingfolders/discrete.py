@@ -143,12 +143,11 @@ def reduce(state, event):
         )
         effects.append({"type": "PROJECT_MAP"})
 
-    elif name == "MAP_TEXT_MOVED":
+    elif name == "MAP_TEXT_GEOMETRY_COMMITTED":
         texts = deepcopy(state["model"]["map-texts"])
         for item in texts:
             if item["id"] == event["text-id"]:
-                item["x"] = event["x"]
-                item["y"] = event["y"]
+                item.update(event["geometry"])
                 break
         state["model"]["map-texts"] = texts
         effects.append(
