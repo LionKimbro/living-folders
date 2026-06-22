@@ -63,7 +63,11 @@
       "map images can be dragged and resized using their lower-right handle",
       "double-clicking a map image opens its stored original through the operating system",
       "Page Up moves the selected file, folder, text, or image one layer toward the front",
-      "Page Down moves the selected element one layer toward the back"
+      "Page Down moves the selected element one layer toward the back",
+      "dragging from empty canvas creates a marquee whose overlapping visible elements glow during the gesture",
+      "marquee release commits a mixed group selection across folders, files, text, labelled regions, and images",
+      "dragging any member of a group selection moves the whole group without enabling group resize",
+      "clicking one item replaces the group with that single selection; clicking empty canvas clears all selection"
     ],
     "storage": [
       ".living-folder/description.json is the current folder constitution",

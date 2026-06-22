@@ -12,6 +12,7 @@ def initial_state():
         "selected-entry": None,
         "selected-text": None,
         "selected-image": None,
+        "group-selection": [],
         "status": "Ready.",
     }
 
@@ -40,6 +41,7 @@ def reduce(state, event):
         state["selected-entry"] = None
         state["selected-text"] = None
         state["selected-image"] = None
+        state["group-selection"] = []
         state["trust-code"] = event["model"]["trust-runnable-code"]
         state["status"] = event.get("status", "Folder loaded.")
         effects.append({"type": "PROJECT"})
@@ -205,6 +207,46 @@ def reduce(state, event):
         )
         effects.append({"type": "PROJECT_MAP"})
 
+    elif name == "GROUP_GEOMETRY_COMMITTED":
+        entry_geometry = deepcopy(state["model"]["map-geometry"])
+        texts = deepcopy(state["model"]["map-texts"])
+        images = deepcopy(state["model"]["map-images"])
+        text_by_id = {item["id"]: item for item in texts}
+        image_by_id = {item["id"]: item for item in images}
+
+        for key, geometry in event["geometry"].items():
+            kind, identity = key.split(":", 1)
+            if kind == "entry":
+                entry_geometry[identity] = geometry
+            elif kind == "text" and identity in text_by_id:
+                text_by_id[identity].update(geometry)
+            elif kind == "image" and identity in image_by_id:
+                image_by_id[identity].update(geometry)
+
+        state["model"]["map-geometry"] = entry_geometry
+        state["model"]["map-texts"] = texts
+        state["model"]["map-images"] = images
+        effects.extend(
+            [
+                {
+                    "type": "WRITE_MAP_GEOMETRY",
+                    "folder": state["folder"],
+                    "geometry": entry_geometry,
+                },
+                {
+                    "type": "WRITE_MAP_TEXTS",
+                    "folder": state["folder"],
+                    "texts": texts,
+                },
+                {
+                    "type": "WRITE_MAP_IMAGES",
+                    "folder": state["folder"],
+                    "images": images,
+                },
+                {"type": "PROJECT_MAP"},
+            ]
+        )
+
     elif name == "DELETE_MAP_IMAGE":
         images = [
             item
@@ -257,18 +299,35 @@ def reduce(state, event):
         state["selected-entry"] = event["entry-name"]
         state["selected-text"] = None
         state["selected-image"] = None
+        state["group-selection"] = []
         effects.append({"type": "PROJECT_MAP"})
 
     elif name == "SELECT_MAP_TEXT":
         state["selected-entry"] = None
         state["selected-text"] = event["text-id"]
         state["selected-image"] = None
+        state["group-selection"] = []
         effects.append({"type": "PROJECT_MAP"})
 
     elif name == "SELECT_MAP_IMAGE":
         state["selected-entry"] = None
         state["selected-text"] = None
         state["selected-image"] = event["image-id"]
+        state["group-selection"] = []
+        effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "SET_GROUP_SELECTION":
+        state["selected-entry"] = None
+        state["selected-text"] = None
+        state["selected-image"] = None
+        state["group-selection"] = list(event["keys"])
+        effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "CLEAR_SELECTION":
+        state["selected-entry"] = None
+        state["selected-text"] = None
+        state["selected-image"] = None
+        state["group-selection"] = []
         effects.append({"type": "PROJECT_MAP"})
 
     elif name == "SET_STATUS":

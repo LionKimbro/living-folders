@@ -85,6 +85,8 @@ g = {
     "map-item-image-id": {},
     "map-image-handles": set(),
     "map-image-photos": {},
+    "marquee-item": None,
+    "marquee-glow-items": [],
     "interaction": None,
     "instance": None,
 }
@@ -429,6 +431,8 @@ def replace_body():
     g["map-item-image-id"].clear()
     g["map-image-handles"].clear()
     g["map-image-photos"].clear()
+    g["marquee-item"] = None
+    g["marquee-glow-items"].clear()
 
     model = g["state"]["model"]
     if model["active-presentation"] == "directory-map":
@@ -595,6 +599,8 @@ def project_map():
     g["map-item-image-id"].clear()
     g["map-image-handles"].clear()
     g["map-image-photos"].clear()
+    g["marquee-item"] = None
+    g["marquee-glow-items"].clear()
     model = g["state"]["model"]
 
     entries = {item["name"]: item for item in model["entries"]}
@@ -616,6 +622,7 @@ def project_map():
             draw_map_text(canvas, texts[identity])
         elif kind == "image" and identity in images:
             draw_map_image(canvas, images[identity])
+    draw_group_selection_glow()
 
 
 def draw_map_entry(canvas, entry, geometry):
@@ -623,7 +630,9 @@ def draw_map_entry(canvas, entry, geometry):
     y = geometry["y"]
     width = geometry["width"]
     height = geometry["height"]
-    selected = g["state"]["selected-entry"] == entry["name"]
+    key = f"entry:{entry['name']}"
+    group_selected = key in g["state"]["group-selection"]
+    selected = g["state"]["selected-entry"] == entry["name"] or group_selected
     fill = visual_colors()[entry["visual-kind"]]
     outline = COLORS["selected"] if selected else "#111111"
     line_width = 3 if selected else 1
@@ -646,19 +655,21 @@ def draw_map_entry(canvas, entry, geometry):
         font=("Segoe UI Semibold", 10),
         width=max(40, width - 18),
     )
-    handle = canvas.create_rectangle(
-        x + width - 12,
-        y + height - 12,
-        x + width,
-        y + height,
-        fill="#111111",
-        outline="",
-    )
-    items = [rectangle, text, handle]
+    items = [rectangle, text]
+    if not group_selected:
+        handle = canvas.create_rectangle(
+            x + width - 12,
+            y + height - 12,
+            x + width,
+            y + height,
+            fill="#111111",
+            outline="",
+        )
+        items.append(handle)
+        g["map-handles"].add(handle)
     g["map-items"][entry["name"]] = items
     for item in items:
         g["map-item-entry"][item] = entry["name"]
-    g["map-handles"].add(handle)
 
 
 def draw_map_text(canvas, text_item):
@@ -688,6 +699,7 @@ def draw_labelled_region(canvas, text_item):
     width = text_item["width"]
     height = text_item["height"]
     color = map_text_color(text_item["color"])
+    group_selected = f"text:{text_item['id']}" in g["state"]["group-selection"]
     line_color = color
     line_width = 1 if text_item["region-line-width"] == "thin" else 2
     label_x, anchor = labelled_region_label_position(text_item)
@@ -741,16 +753,19 @@ def draw_labelled_region(canvas, text_item):
         fill=line_color,
         width=line_width,
     )
-    handle = canvas.create_rectangle(
-        x + width - 14,
-        bottom_y - 14,
-        x + width,
-        bottom_y,
-        fill=line_color,
-        outline="#111111",
-    )
-    g["map-text-handles"].add(handle)
-    return [left, right, bottom, top_left, top_right, label, handle]
+    items = [left, right, bottom, top_left, top_right, label]
+    if not group_selected:
+        handle = canvas.create_rectangle(
+            x + width - 14,
+            bottom_y - 14,
+            x + width,
+            bottom_y,
+            fill=line_color,
+            outline="#111111",
+        )
+        items.append(handle)
+        g["map-text-handles"].add(handle)
+    return items
 
 
 def labelled_region_label_position(text_item):
@@ -774,7 +789,9 @@ def draw_map_image(canvas, image_item):
     y = image_item["y"]
     width = image_item["width"]
     height = image_item["height"]
-    selected = g["state"]["selected-image"] == image_item["id"]
+    key = f"image:{image_item['id']}"
+    group_selected = key in g["state"]["group-selection"]
+    selected = g["state"]["selected-image"] == image_item["id"] or group_selected
     border = canvas.create_rectangle(
         x,
         y,
@@ -785,20 +802,156 @@ def draw_map_image(canvas, image_item):
         width=3 if selected else 1,
     )
     picture = canvas.create_image(x, y, image=photo, anchor="nw")
-    handle = canvas.create_rectangle(
-        x + width - 14,
-        y + height - 14,
-        x + width,
-        y + height,
-        fill="#ffffff",
-        outline="#111111",
-    )
-    items = [border, picture, handle]
+    items = [border, picture]
+    if not group_selected:
+        handle = canvas.create_rectangle(
+            x + width - 14,
+            y + height - 14,
+            x + width,
+            y + height,
+            fill="#ffffff",
+            outline="#111111",
+        )
+        items.append(handle)
+        g["map-image-handles"].add(handle)
     g["map-image-items"][image_item["id"]] = items
     g["map-image-photos"][image_item["id"]] = photo
     for item in items:
         g["map-item-image-id"][item] = image_item["id"]
-    g["map-image-handles"].add(handle)
+
+
+def draw_group_selection_glow():
+    canvas = g["widgets"].get("map")
+    if not canvas:
+        return
+    for key in g["state"]["group-selection"]:
+        bbox = map_element_bbox(key)
+        if not bbox:
+            continue
+        x1, y1, x2, y2 = bbox
+        canvas.create_rectangle(
+            x1 - 4,
+            y1 - 4,
+            x2 + 4,
+            y2 + 4,
+            outline=COLORS["accent"],
+            width=3,
+            dash=(5, 3),
+            tags=("group-selection-glow",),
+        )
+
+
+def refresh_group_selection_glow():
+    canvas = g["widgets"]["map"]
+    canvas.delete("group-selection-glow")
+    draw_group_selection_glow()
+
+
+def top_map_hit(items):
+    for item in reversed(items):
+        if item in g["map-item-image-id"]:
+            return item, f"image:{g['map-item-image-id'][item]}"
+        if item in g["map-item-text-id"]:
+            return item, f"text:{g['map-item-text-id'][item]}"
+        if item in g["map-item-entry"]:
+            return item, f"entry:{g['map-item-entry'][item]}"
+    return None, None
+
+
+def map_element_bbox(key):
+    kind, identity = key.split(":", 1)
+    if kind == "entry" and identity in g["map-items"]:
+        return g["widgets"]["map"].bbox(*g["map-items"][identity])
+    if kind == "text" and identity in g["map-text-items"]:
+        return g["widgets"]["map"].bbox(*g["map-text-items"][identity])
+    if kind == "image" and identity in g["map-image-items"]:
+        return g["widgets"]["map"].bbox(*g["map-image-items"][identity])
+    return None
+
+
+def current_map_element_geometry(key):
+    kind, identity = key.split(":", 1)
+    if kind == "entry":
+        return current_canvas_geometry(identity)
+    if kind == "text":
+        return current_canvas_text_geometry(identity)
+    if kind == "image":
+        return current_canvas_image_geometry(identity)
+    raise ValueError(f"Unknown map element kind: {kind}")
+
+
+def position_map_element(key, geometry):
+    kind, identity = key.split(":", 1)
+    if kind == "entry":
+        position_canvas_entry(identity, geometry)
+    elif kind == "text":
+        position_canvas_text(identity, geometry)
+    elif kind == "image":
+        position_canvas_image(identity, geometry)
+    else:
+        raise ValueError(f"Unknown map element kind: {kind}")
+
+
+def update_marquee_preview(interaction):
+    canvas = g["widgets"]["map"]
+    clear_marquee_preview()
+    x1, y1, x2, y2 = normalized_rectangle(
+        interaction["start-x"],
+        interaction["start-y"],
+        interaction["current-x"],
+        interaction["current-y"],
+    )
+    g["marquee-item"] = canvas.create_rectangle(
+        x1,
+        y1,
+        x2,
+        y2,
+        outline=COLORS["accent"],
+        width=2,
+        dash=(6, 4),
+        fill="#19364a",
+        stipple="gray50",
+    )
+    candidates = []
+    for key in g["state"]["model"]["map-z-order"]:
+        bbox = map_element_bbox(key)
+        if bbox and rectangles_overlap((x1, y1, x2, y2), bbox):
+            candidates.append(key)
+            glow = canvas.create_rectangle(
+                bbox[0] - 5,
+                bbox[1] - 5,
+                bbox[2] + 5,
+                bbox[3] + 5,
+                outline="#b8ebff",
+                width=4,
+            )
+            g["marquee-glow-items"].append(glow)
+    interaction["candidates"] = candidates
+
+
+def clear_marquee_preview():
+    canvas = g["widgets"].get("map")
+    if not canvas:
+        return
+    if g["marquee-item"]:
+        canvas.delete(g["marquee-item"])
+        g["marquee-item"] = None
+    for item in g["marquee-glow-items"]:
+        canvas.delete(item)
+    g["marquee-glow-items"].clear()
+
+
+def normalized_rectangle(x1, y1, x2, y2):
+    return min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
+
+
+def rectangles_overlap(first, second):
+    return not (
+        first[2] < second[0]
+        or first[0] > second[2]
+        or first[3] < second[1]
+        or first[1] > second[3]
+    )
 
 
 def default_geometry(number):
@@ -815,16 +968,34 @@ def default_geometry(number):
 def handle_map_press(event):
     canvas = g["widgets"]["map"]
     canvas.focus_set()
+    x = canvas.canvasx(event.x)
+    y = canvas.canvasy(event.y)
     items = canvas.find_overlapping(
-        canvas.canvasx(event.x),
-        canvas.canvasy(event.y),
-        canvas.canvasx(event.x),
-        canvas.canvasy(event.y),
+        x,
+        y,
+        x,
+        y,
     )
-    image_items = [item for item in reversed(items) if item in g["map-item-image-id"]]
-    if image_items:
-        item = image_items[0]
-        image_id = g["map-item-image-id"][item]
+    item, key = top_map_hit(items)
+
+    if key and key in g["state"]["group-selection"]:
+        origins = {
+            selected: current_map_element_geometry(selected)
+            for selected in g["state"]["group-selection"]
+        }
+        g["interaction"] = {
+            "kind": "group",
+            "pressed-key": key,
+            "start-x": x,
+            "start-y": y,
+            "origins": origins,
+            "preview": origins,
+            "changed": False,
+        }
+        return
+
+    if key and key.startswith("image:"):
+        image_id = key.split(":", 1)[1]
         is_resize = item in g["map-image-handles"]
         dispatch({"type": "SELECT_MAP_IMAGE", "image-id": image_id})
         geometry = current_canvas_image_geometry(image_id)
@@ -832,17 +1003,16 @@ def handle_map_press(event):
             "kind": "image",
             "image-id": image_id,
             "mode": "resize" if is_resize else "move",
-            "start-x": canvas.canvasx(event.x),
-            "start-y": canvas.canvasy(event.y),
+            "start-x": x,
+            "start-y": y,
             "origin": geometry,
             "preview": geometry.copy(),
             "changed": False,
         }
         return
-    text_items = [item for item in reversed(items) if item in g["map-item-text-id"]]
-    if text_items:
-        item = text_items[0]
-        text_id = g["map-item-text-id"][item]
+
+    if key and key.startswith("text:"):
+        text_id = key.split(":", 1)[1]
         is_resize = item in g["map-text-handles"]
         dispatch({"type": "SELECT_MAP_TEXT", "text-id": text_id})
         geometry = current_canvas_text_geometry(text_id)
@@ -850,29 +1020,39 @@ def handle_map_press(event):
             "kind": "text",
             "text-id": text_id,
             "mode": "resize" if is_resize else "move",
-            "start-x": canvas.canvasx(event.x),
-            "start-y": canvas.canvasy(event.y),
+            "start-x": x,
+            "start-y": y,
             "origin": geometry,
             "preview": geometry.copy(),
             "changed": False,
         }
         return
-    known = [item for item in reversed(items) if item in g["map-item-entry"]]
-    if not known:
-        g["interaction"] = None
+
+    if key and key.startswith("entry:"):
+        name = key.split(":", 1)[1]
+        is_resize = item in g["map-handles"]
+        geometry = current_canvas_geometry(name)
+        dispatch({"type": "SELECT_ENTRY", "entry-name": name})
+        g["interaction"] = {
+            "kind": "entry",
+            "entry-name": name,
+            "mode": "resize" if is_resize else "move",
+            "start-x": x,
+            "start-y": y,
+            "origin": geometry,
+            "preview": geometry.copy(),
+            "changed": False,
+        }
         return
 
-    item = known[0]
-    name = g["map-item-entry"][item]
-    geometry = current_canvas_geometry(name)
+    dispatch({"type": "CLEAR_SELECTION"})
     g["interaction"] = {
-        "kind": "entry",
-        "entry-name": name,
-        "mode": "resize" if item in g["map-handles"] else "move",
-        "start-x": canvas.canvasx(event.x),
-        "start-y": canvas.canvasy(event.y),
-        "origin": geometry,
-        "preview": geometry.copy(),
+        "kind": "marquee",
+        "start-x": x,
+        "start-y": y,
+        "current-x": x,
+        "current-y": y,
+        "candidates": [],
         "changed": False,
     }
 
@@ -884,8 +1064,29 @@ def handle_map_motion(event):
     canvas = g["widgets"]["map"]
     dx = canvas.canvasx(event.x) - interaction["start-x"]
     dy = canvas.canvasy(event.y) - interaction["start-y"]
-    origin = interaction["origin"]
+    if interaction["kind"] == "marquee":
+        interaction["current-x"] = canvas.canvasx(event.x)
+        interaction["current-y"] = canvas.canvasy(event.y)
+        interaction["changed"] = True
+        update_marquee_preview(interaction)
+        return
 
+    if interaction["kind"] == "group":
+        preview = {}
+        for key, origin in interaction["origins"].items():
+            geometry = {
+                **origin,
+                "x": max(0, int(origin["x"] + dx)),
+                "y": max(0, int(origin["y"] + dy)),
+            }
+            preview[key] = geometry
+            position_map_element(key, geometry)
+        refresh_group_selection_glow()
+        interaction["preview"] = preview
+        interaction["changed"] = True
+        return
+
+    origin = interaction["origin"]
     if interaction["kind"] == "text":
         if interaction["mode"] == "resize":
             preview = {
@@ -943,6 +1144,27 @@ def handle_map_release(_event):
     interaction = g["interaction"]
     g["interaction"] = None
     if not interaction:
+        return
+    if interaction["kind"] == "marquee":
+        clear_marquee_preview()
+        if interaction["changed"]:
+            dispatch(
+                {
+                    "type": "SET_GROUP_SELECTION",
+                    "keys": interaction["candidates"],
+                }
+            )
+        return
+    if interaction["kind"] == "group":
+        if interaction["changed"]:
+            dispatch(
+                {
+                    "type": "GROUP_GEOMETRY_COMMITTED",
+                    "geometry": interaction["preview"],
+                }
+            )
+        else:
+            select_map_key(interaction["pressed-key"])
         return
     if interaction["kind"] == "text":
         if interaction["changed"]:
@@ -1398,6 +1620,16 @@ def selected_map_layer_key():
     return None
 
 
+def select_map_key(key):
+    kind, identity = key.split(":", 1)
+    if kind == "entry":
+        dispatch({"type": "SELECT_ENTRY", "entry-name": identity})
+    elif kind == "text":
+        dispatch({"type": "SELECT_MAP_TEXT", "text-id": identity})
+    elif kind == "image":
+        dispatch({"type": "SELECT_MAP_IMAGE", "image-id": identity})
+
+
 def current_canvas_geometry(name):
     canvas = g["widgets"]["map"]
     rectangle = g["map-items"][name][0]
@@ -1441,7 +1673,7 @@ def current_canvas_image_geometry(image_id):
 
 def position_canvas_entry(name, geometry):
     canvas = g["widgets"]["map"]
-    rectangle, text, handle = g["map-items"][name]
+    rectangle, text, *rest = g["map-items"][name]
     x = geometry["x"]
     y = geometry["y"]
     width = geometry["width"]
@@ -1449,13 +1681,15 @@ def position_canvas_entry(name, geometry):
     canvas.coords(rectangle, x, y, x + width, y + height)
     canvas.coords(text, x + 9, y + 9)
     canvas.itemconfigure(text, width=max(40, width - 18))
-    canvas.coords(
-        handle,
-        x + width - 12,
-        y + height - 12,
-        x + width,
-        y + height,
-    )
+    if rest:
+        handle = rest[0]
+        canvas.coords(
+            handle,
+            x + width - 12,
+            y + height - 12,
+            x + width,
+            y + height,
+        )
 
 
 def position_canvas_text(text_id, geometry):
@@ -1471,20 +1705,22 @@ def position_canvas_text(text_id, geometry):
 
 def position_canvas_image(image_id, geometry):
     canvas = g["widgets"]["map"]
-    border, picture, handle = g["map-image-items"][image_id]
+    border, picture, *rest = g["map-image-items"][image_id]
     x = geometry["x"]
     y = geometry["y"]
     width = geometry["width"]
     height = geometry["height"]
     canvas.coords(border, x, y, x + width, y + height)
     canvas.coords(picture, x, y)
-    canvas.coords(
-        handle,
-        x + width - 14,
-        y + height - 14,
-        x + width,
-        y + height,
-    )
+    if rest:
+        handle = rest[0]
+        canvas.coords(
+            handle,
+            x + width - 14,
+            y + height - 14,
+            x + width,
+            y + height,
+        )
 
 
 def handle_path_entered(_event=None):

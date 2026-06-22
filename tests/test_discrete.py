@@ -241,6 +241,89 @@ class DiscreteEngineTests(unittest.TestCase):
             state["model"]["map-z-order"],
         )
 
+    def test_group_selection_and_movement_commit_mixed_geometry(self):
+        state = initial_state()
+        state["folder"] = "C:/map"
+        state["model"] = {
+            "map-geometry": {
+                "alpha.txt": {"x": 10, "y": 20, "width": 100, "height": 60}
+            },
+            "map-texts": [
+                {
+                    "id": "note",
+                    "text": "note",
+                    "x": 30,
+                    "y": 40,
+                    "width": 320,
+                    "height": 180,
+                }
+            ],
+            "map-images": [
+                {
+                    "id": "image",
+                    "asset": "abc.png",
+                    "x": 50,
+                    "y": 60,
+                    "width": 200,
+                    "height": 100,
+                }
+            ],
+        }
+
+        state, effects = reduce(
+            state,
+            {
+                "type": "SET_GROUP_SELECTION",
+                "keys": ["entry:alpha.txt", "text:note", "image:image"],
+            },
+        )
+        self.assertEqual(3, len(state["group-selection"]))
+        self.assertIsNone(state["selected-entry"])
+        self.assertEqual([{"type": "PROJECT_MAP"}], effects)
+
+        state, effects = reduce(
+            state,
+            {
+                "type": "GROUP_GEOMETRY_COMMITTED",
+                "geometry": {
+                    "entry:alpha.txt": {
+                        "x": 25,
+                        "y": 35,
+                        "width": 100,
+                        "height": 60,
+                    },
+                    "text:note": {
+                        "x": 45,
+                        "y": 55,
+                        "width": 320,
+                        "height": 180,
+                    },
+                    "image:image": {
+                        "x": 65,
+                        "y": 75,
+                        "width": 200,
+                        "height": 100,
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(25, state["model"]["map-geometry"]["alpha.txt"]["x"])
+        self.assertEqual(45, state["model"]["map-texts"][0]["x"])
+        self.assertEqual(65, state["model"]["map-images"][0]["x"])
+        self.assertEqual(
+            [
+                "WRITE_MAP_GEOMETRY",
+                "WRITE_MAP_TEXTS",
+                "WRITE_MAP_IMAGES",
+                "PROJECT_MAP",
+            ],
+            [effect["type"] for effect in effects],
+        )
+
+        state, _effects = reduce(state, {"type": "CLEAR_SELECTION"})
+        self.assertEqual([], state["group-selection"])
+
 
 if __name__ == "__main__":
     unittest.main()
