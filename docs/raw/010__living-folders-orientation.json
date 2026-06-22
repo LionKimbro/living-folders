@@ -1,6 +1,6 @@
 {
   "document": {
-    "document-id": "living-folders.orientation.v0.4",
+    "document-id": "living-folders.orientation.v0.5",
     "title": "Living Folders Orientation",
     "tags": [
       "living-folders",
@@ -38,6 +38,8 @@
       "the Presentation combobox may save an explicit override",
       "Auto removes the override and returns authority to inference",
       "Directory Map is a presentation alongside Project Root, Workbench, Factory, Library, Gallery, Inbox, Vault, Warehouse, Hallway, and Ruin"
+      ,
+      "Temporal is a general chronological interpretation; Daystream is its first layout"
     ],
     "folder-buttons": [
       "declared navigation and command buttons are stored in .living-folder/description.json",
@@ -69,6 +71,22 @@
       "dragging any member of a group selection moves the whole group without enabling group resize",
       "clicking one item replaces the group with that single selection; clicking empty canvas clears all selection"
     ],
+    "temporal-folder": [
+      "Temporal inference activates when at least three immediate entries contain valid YYYY-MM-DD dates and at least half of eligible entries participate",
+      "an entry named exactly YYYY-MM-DD is canonical; a dated filename is associated with the same day node",
+      "Daystream projects continuous Monday-first weeks rather than paged calendar months",
+      "the initial position is the latest occupied node with one following week of context by default",
+      "the temporal minimap summarizes activity by month and jumps the main surface through time",
+      "folder navigation and command buttons remain available immediately below the global Presentation strip and before the Daystream title",
+      "unmatched entries remain visible in the bottom exceptions shelf; backup names matching *~ are hidden by default",
+      "single-click selects a day; double-click smart-opens one canonical entry or opens a temporal cockpit for ambiguity",
+      "double-clicking an empty day offers to create its canonical YYYY-MM-DD folder",
+      "Shift plus double-click creates the canonical day folder directly",
+      "Alt plus double-click reveals matching entries; right-click opens the temporal context menu",
+      "wheel moves one week, Shift plus wheel approximately one month, and Control plus wheel one year",
+      "arrow keys move the selected day; Enter opens it; Space opens its cockpit; N creates it; T/Home jumps to today; M/End jumps to the latest occupied day; R opens the raw control-panel view",
+      "Temporal interpretation never moves, renames, or rewrites the entries it gathers"
+    ],
     "storage": [
       ".living-folder/description.json is the current folder constitution",
       ".living-folder/images/<sha256>.<ext> stores imported originals",
@@ -79,7 +97,7 @@
   },
   "architecture": {
     "cli": "lionscliapp owns declaration, dispatch, persistent app configuration, and execpath.folder coercion.",
-    "world-model": "The filesystem plus .living-folder/description.json and its content-addressed image tree own durable folder reality.",
+    "world-model": "The filesystem plus .living-folder/description.json and its content-addressed image tree own durable folder reality. Temporal nodes are derived projections over immediate entries.",
     "discrete-engine": "Semantic events reduce into compact navigation, trust, selection, and committed map state, producing explicit effects.",
     "continuity": "Tk pointer callbacks own in-progress map move and resize previews. Only release emits committed semantic meaning.",
     "projection": "Tk widgets and canvas items are downstream renderings and do not decide semantic truth.",

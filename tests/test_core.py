@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from livingfolders.core import (
+    extract_iso_days,
     delete_immediate_file,
     get_cached_image_path,
     import_clipboard_image,
@@ -269,6 +270,62 @@ class FolderModelTests(unittest.TestCase):
                 ["text:note-1", "entry:alpha.txt"],
                 model["map-z-order"],
             )
+
+    def test_temporal_folder_is_inferred_from_coherent_iso_date_entries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            for day in ["2026-06-08", "2026-06-11", "2026-06-12", "2026-06-13"]:
+                (folder / day).mkdir()
+            (folder / "timesheets.txt").write_text("summary", encoding="utf-8")
+
+            model = inspect_folder(folder)
+
+            self.assertEqual("temporal", model["inferred-presentation"])
+            self.assertEqual("temporal", model["active-presentation"])
+            self.assertEqual("day", model["temporal"]["resolution"])
+            self.assertEqual("2026-06-13", model["temporal"]["most-recent-date"])
+            self.assertEqual(4, len(model["temporal"]["nodes"]))
+            self.assertEqual(
+                "2026-06-08",
+                model["temporal"]["nodes"][0]["canonical"][0]["entry"]["name"],
+            )
+            self.assertEqual(
+                ["timesheets.txt"],
+                [
+                    item["entry"]["name"]
+                    for item in model["temporal"]["exceptions"]
+                ],
+            )
+
+    def test_temporal_model_gathers_associated_artifacts_without_moving_them(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            (folder / "2026-06-20").mkdir()
+            (folder / "notes-2026-06-20.md").write_text("notes", encoding="utf-8")
+            (folder / "build_2026-06-20.zip").write_bytes(b"zip")
+            (folder / "scratch.txt~").write_text("backup", encoding="utf-8")
+
+            model = inspect_folder(folder)
+            node = model["temporal"]["node-by-date"]["2026-06-20"]
+
+            self.assertEqual(1, len(node["canonical"]))
+            self.assertEqual(
+                {"notes-2026-06-20.md", "build_2026-06-20.zip"},
+                {
+                    item["entry"]["name"]
+                    for item in node["associated"]
+                },
+            )
+            self.assertEqual(
+                ["scratch.txt~"],
+                [item["name"] for item in model["temporal"]["hidden"]],
+            )
+
+    def test_temporal_matching_rejects_invalid_calendar_dates(self):
+        self.assertEqual(
+            ["2026-02-28"],
+            extract_iso_days("bad-2026-02-30_good-2026-02-28.txt"),
+        )
 
 
 if __name__ == "__main__":

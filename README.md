@@ -5,7 +5,7 @@
 Living Folders is a small semantic lens over the ordinary filesystem. It reads
 an optional `.living-folder/description.json`, notices the folder's real contents, and
 renders the directory as a workbench, project ground, factory, gallery, ruin,
-or another kind of place.
+temporal landscape, or another kind of place.
 
 Legacy `.living-folder.json` files remain readable. New writes use the
 `.living-folder/` directory form.
@@ -30,6 +30,13 @@ living-folders --execpath.folder C:\some\folder init
 The window provides editable path navigation, back/up/refresh controls,
 presentation override, compact folder buttons, Explorer and shell escape
 hatches, and a draggable/resizable Directory Map presentation.
+
+Folders dominated by valid `YYYY-MM-DD` entry names are inferred as Temporal
+Folders. Their Daystream presentation places canonical date folders and dated
+artifacts onto a continuous Monday-first week strip, supplies a month/year
+minimap, preserves undated entries in an exceptions shelf, and smart-opens or
+creates the selected temporal node. The files and directories remain ordinary
+filesystem entries; the calendar is only their interpretation.
 
 The fuller orientation and manifest SoftSpec live in `docs/raw/`.
 

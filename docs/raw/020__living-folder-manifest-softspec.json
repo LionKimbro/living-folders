@@ -1,6 +1,6 @@
 {
   "document": {
-    "document-id": "living-folders.manifest.softspec.v0.3",
+    "document-id": "living-folders.manifest.softspec.v0.5",
     "title": "Living Folder Manifest SoftSpec",
     "tags": [
       "living-folders",
@@ -130,6 +130,51 @@
           "height": "integer rendered height"
         },
         "additional_keys": true
+      },
+      "temporal-view": {
+        "type": "object",
+        "description": "Folder-local choices for projecting ordinary entries onto time. The filesystem remains authoritative.",
+        "keys": {
+          "layout": {
+            "type": "string",
+            "vocabulary": {
+              "daystream": "Arrange day nodes as one continuous Monday-first strip of weeks."
+            },
+            "vocabulary_mode": "open"
+          },
+          "resolution": {
+            "type": "string",
+            "vocabulary": {
+              "day": "Gather entries at ISO calendar-day nodes."
+            },
+            "vocabulary_mode": "open"
+          },
+          "week-start": {
+            "type": "string",
+            "vocabulary": {
+              "monday": "Weeks begin on Monday."
+            }
+          },
+          "initial-position": {
+            "type": "string",
+            "vocabulary": {
+              "most-recent": "Initially reveal the latest occupied temporal node.",
+              "today": "Initially reveal the current day when it is in range.",
+              "earliest": "Initially reveal the earliest occupied node."
+            }
+          },
+          "future-context-weeks": "integer from 0 through 12; number of empty following weeks retained after the latest occupied day",
+          "hidden-file-patterns": {
+            "type": "array",
+            "items": "string glob pattern",
+            "description": "Entries excluded from both temporal nodes and the exceptions shelf; defaults to *~."
+          },
+          "show-modification-associations": {
+            "type": "boolean",
+            "description": "Reserved preference for exposing weaker filesystem-metadata associations; false by default."
+          }
+        },
+        "additional_keys": true
       }
     },
     "schemas": {
@@ -144,6 +189,9 @@
           "resize caches are derived artifacts under .living-folder/images/cache and are not authoritative.",
           "Legacy .living-folder.json files are readable but deprecated; new writes use the directory form.",
           "The constitution augments the filesystem and never replaces it."
+          ,
+          "Temporal interpretation gathers entries around dates found in names; it does not move or rewrite those entries.",
+          "Unmatched temporal entries remain visible in the exceptions shelf unless an explicit hidden-file-pattern matches them."
         ],
         "structure": {
           "type": "object",
@@ -159,8 +207,9 @@
             "presentation-mode": {
               "type": "string",
               "required": false,
-              "description": "Explicit presentation override such as directory-map, project-root, workbench, factory, library, gallery, inbox, vault, warehouse, hallway, or ruin."
+              "description": "Explicit presentation override such as temporal, directory-map, project-root, workbench, factory, library, gallery, inbox, vault, warehouse, hallway, or ruin."
             },
+            "temporal-view": "temporal-view",
             "buttons": {
               "type": "array",
               "items": "folder-button"

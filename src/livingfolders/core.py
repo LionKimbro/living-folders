@@ -6,9 +6,11 @@ import json
 import hashlib
 import io
 import os
+import re
 import shutil
 import sys
 import uuid
+from datetime import date, datetime
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
@@ -24,6 +26,7 @@ LEGACY_MANIFEST_NAMES = (
 IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 
 PRESENTATION_MODES = [
+    "temporal",
     "directory-map",
     "project-root",
     "control-panel",
@@ -57,6 +60,8 @@ TEXT_SUFFIXES = {
     ".tsv",
 }
 
+ISO_DAY_PATTERN = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
+
 
 def inspect_folder(path):
     """Normalize one directory and its constitution into the trusted world shape."""
@@ -71,6 +76,8 @@ def inspect_folder(path):
     map_texts = normalize_map_texts(raw)
     map_images = normalize_map_images(raw)
     map_z_order = normalize_map_z_order(raw, entries, map_texts, map_images)
+    temporal_view = normalize_temporal_view(raw)
+    temporal = build_temporal_model(entries, temporal_view)
 
     return {
         "folder": str(folder),
@@ -94,6 +101,8 @@ def inspect_folder(path):
         "map-texts": map_texts,
         "map-images": map_images,
         "map-z-order": map_z_order,
+        "temporal-view": temporal_view,
+        "temporal": temporal,
         "entries": entries,
     }
 
@@ -147,7 +156,8 @@ def read_entries(folder):
             continue
         try:
             is_folder = path.is_dir()
-            size = None if is_folder else path.stat().st_size
+            stat = path.stat()
+            size = None if is_folder else stat.st_size
         except OSError:
             continue
         entries.append(
@@ -157,6 +167,7 @@ def read_entries(folder):
                 "kind": "folder" if is_folder else "file",
                 "visual-kind": classify_entry(path, is_folder),
                 "size": size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(),
             }
         )
     return entries
@@ -186,6 +197,8 @@ def infer_presentation(folder, entries):
         return "project-root"
     if {"inbox", "outbox"} <= names or {"input", "output"} <= names:
         return "factory"
+    if temporal_inference_score(entries)["inferred"]:
+        return "temporal"
     if "archive" in folder.name.lower() or folder.name.lower().startswith("old"):
         return "ruin"
     if suffixes and suffixes <= {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}:
@@ -193,6 +206,155 @@ def infer_presentation(folder, entries):
     if "inbox" in folder.name.lower():
         return "inbox"
     return "workbench"
+
+
+def temporal_inference_score(entries):
+    """Measure whether immediate children form one coherent date-organized place."""
+    dated = sum(bool(extract_iso_days(entry["name"])) for entry in entries)
+    eligible = len(entries)
+    ratio = dated / eligible if eligible else 0.0
+    return {
+        "dated-entry-count": dated,
+        "eligible-entry-count": eligible,
+        "ratio": ratio,
+        "inferred": dated >= 3 and ratio >= 0.5,
+    }
+
+
+def extract_iso_days(name):
+    """Return valid, unique ISO calendar days embedded in one entry name."""
+    found = []
+    for candidate in ISO_DAY_PATTERN.findall(str(name)):
+        try:
+            parsed = date.fromisoformat(candidate)
+        except ValueError:
+            continue
+        normalized = parsed.isoformat()
+        if normalized not in found:
+            found.append(normalized)
+    return found
+
+
+def normalize_temporal_view(raw):
+    source = raw.get("temporal-view", {})
+    if not isinstance(source, dict):
+        raise ValueError("manifest.temporal-view must be an object.")
+
+    layout = str(source.get("layout", "daystream")).strip().lower()
+    if layout not in {"daystream"}:
+        layout = "daystream"
+    resolution = str(source.get("resolution", "day")).strip().lower()
+    if resolution not in {"day"}:
+        resolution = "day"
+    week_start = str(source.get("week-start", "monday")).strip().lower()
+    if week_start not in {"monday"}:
+        week_start = "monday"
+    initial_position = str(
+        source.get("initial-position", "most-recent")
+    ).strip().lower()
+    if initial_position not in {"most-recent", "today", "earliest"}:
+        initial_position = "most-recent"
+
+    hidden = source.get("hidden-file-patterns", ["*~"])
+    if not isinstance(hidden, list) or not all(
+        isinstance(item, str) for item in hidden
+    ):
+        raise ValueError(
+            "manifest.temporal-view.hidden-file-patterns must be an array of strings."
+        )
+
+    return {
+        "layout": layout,
+        "resolution": resolution,
+        "week-start": week_start,
+        "initial-position": initial_position,
+        "future-context-weeks": max(
+            0,
+            min(12, integer_or_default(source.get("future-context-weeks"), 1)),
+        ),
+        "hidden-file-patterns": hidden,
+        "show-modification-associations": (
+            source.get("show-modification-associations") is True
+        ),
+    }
+
+
+def build_temporal_model(entries, temporal_view):
+    """Project ordinary filesystem entries onto day nodes without moving them."""
+    nodes = {}
+    exceptions = []
+    hidden = []
+
+    for entry in entries:
+        if matches_any_pattern(entry["name"], temporal_view["hidden-file-patterns"]):
+            hidden.append(entry)
+            continue
+
+        day_keys = extract_iso_days(entry["name"])
+        if not day_keys:
+            exceptions.append(
+                {
+                    "entry": entry,
+                    "reason": "undated",
+                }
+            )
+            continue
+
+        exact_name = entry["name"] in day_keys
+        exact_stem = Path(entry["name"]).stem in day_keys
+        for day_key in day_keys:
+            node = nodes.setdefault(
+                day_key,
+                {
+                    "date": day_key,
+                    "canonical": [],
+                    "associated": [],
+                    "latest-modified": None,
+                },
+            )
+            association = {
+                "entry": entry,
+                "confidence": (
+                    "canonical"
+                    if exact_name
+                    else "exact-stem"
+                    if exact_stem
+                    else "filename"
+                ),
+            }
+            bucket = "canonical" if exact_name else "associated"
+            node[bucket].append(association)
+            modified = entry.get("modified")
+            if modified and (
+                node["latest-modified"] is None
+                or modified > node["latest-modified"]
+            ):
+                node["latest-modified"] = modified
+
+    ordered = [nodes[key] for key in sorted(nodes)]
+    return {
+        "resolution": "day",
+        "nodes": ordered,
+        "node-by-date": {node["date"]: node for node in ordered},
+        "exceptions": exceptions,
+        "hidden": hidden,
+        "earliest-date": ordered[0]["date"] if ordered else None,
+        "most-recent-date": ordered[-1]["date"] if ordered else None,
+        "inference": temporal_inference_score(entries),
+    }
+
+
+def matches_any_pattern(name, patterns):
+    from fnmatch import fnmatch
+
+    return any(fnmatch(name, pattern) for pattern in patterns)
+
+
+def integer_or_default(value, default):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def normalize_optional_mode(value):
@@ -701,6 +863,7 @@ def ensure_manifest_identity(raw, folder):
 
 def infer_purpose(mode):
     purposes = {
+        "temporal": "Filesystem entries gather into a navigable shape of time.",
         "project-root": "A software project and its local controls.",
         "factory": "Inputs, stages, and outputs live here.",
         "gallery": "Visual material is arranged for browsing.",

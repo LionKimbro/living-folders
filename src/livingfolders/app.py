@@ -8,6 +8,7 @@ import subprocess
 import threading
 import tkinter as tk
 import uuid
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -53,6 +54,7 @@ COLORS = {
 }
 
 MODE_LABELS = {
+    "temporal": "Temporal · Daystream",
     "directory-map": "Directory Map",
     "project-root": "Project Root",
     "control-panel": "Control Panel",
@@ -88,6 +90,9 @@ g = {
     "marquee-item": None,
     "marquee-glow-items": [],
     "interaction": None,
+    "temporal-selected": None,
+    "temporal-cell-items": {},
+    "temporal-row-by-date": {},
     "instance": None,
 }
 
@@ -177,6 +182,25 @@ def build_styles():
         background=COLORS["panel-2"],
         foreground=COLORS["text"],
         arrowcolor=COLORS["text"],
+    )
+    style.configure(
+        "Treeview",
+        background=COLORS["panel"],
+        fieldbackground=COLORS["panel"],
+        foreground=COLORS["text"],
+        rowheight=24,
+        borderwidth=0,
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", "#375d78")],
+        foreground=[("selected", COLORS["text"])],
+    )
+    style.configure(
+        "Treeview.Heading",
+        background=COLORS["panel-2"],
+        foreground=COLORS["text"],
+        relief="flat",
     )
 
 
@@ -437,6 +461,8 @@ def replace_body():
     model = g["state"]["model"]
     if model["active-presentation"] == "directory-map":
         build_directory_map(body)
+    elif model["active-presentation"] == "temporal":
+        build_temporal_view(body)
     else:
         build_control_panel(body)
 
@@ -501,7 +527,768 @@ def build_control_panel(parent):
         tree.tag_configure(kind, foreground=color)
 
 
-def project_actions():
+def build_temporal_view(parent):
+    """Project a chronological folder as a continuous stream of weeks."""
+    frame = tk.Frame(parent, bg=COLORS["background"], padx=12, pady=10)
+    frame.grid(row=0, column=0, sticky="nsew")
+    frame.columnconfigure(0, weight=1)
+    model = g["state"]["model"]
+    temporal = model["temporal"]
+    buttons = model["buttons"] + model["detected-buttons"]
+
+    header_row = 0
+    if buttons:
+        actions = tk.Frame(frame, bg=COLORS["background"])
+        actions.grid(row=0, column=0, sticky="ew", pady=(0, 9))
+        g["widgets"]["actions"] = actions
+        project_actions(show_empty_message=False)
+        header_row = 1
+
+    content_row = header_row + 1
+    exceptions_row = content_row + 1
+    frame.rowconfigure(content_row, weight=1)
+
+    header = tk.Frame(frame, bg=COLORS["background"])
+    header.grid(row=header_row, column=0, sticky="ew", pady=(0, 8))
+    header.columnconfigure(0, weight=1)
+
+    title = tk.Frame(header, bg=COLORS["background"])
+    title.grid(row=0, column=0, sticky="w")
+    tk.Label(
+        title,
+        text=model["title"],
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+        font=("Segoe UI Semibold", 18),
+    ).grid(row=0, column=0, sticky="w")
+    tk.Label(
+        title,
+        text=(
+            f"Temporal folder · {len(temporal['nodes'])} occupied days · "
+            f"{len(temporal['exceptions'])} unplaced"
+        ),
+        bg=COLORS["background"],
+        fg=COLORS["quiet"],
+    ).grid(row=1, column=0, sticky="w")
+
+    controls = tk.Frame(header, bg=COLORS["background"])
+    controls.grid(row=0, column=1, sticky="e")
+    for column, (label, command) in enumerate(
+        [
+            ("Today", lambda: scroll_daystream_to(date.today().isoformat())),
+            ("Most recent", scroll_daystream_to_most_recent),
+            ("＋ Day…", create_dated_entry_dialog),
+            (
+                "Raw folder view",
+                lambda: dispatch(
+                    {"type": "SET_PRESENTATION", "mode": "control-panel"}
+                ),
+            ),
+        ]
+    ):
+        ttk.Button(
+            controls,
+            text=label,
+            command=command,
+            style="Living.TButton",
+        ).grid(row=0, column=column, padx=(6 if column else 0, 0))
+
+    content = tk.Frame(frame, bg=COLORS["background"])
+    content.grid(row=content_row, column=0, sticky="nsew")
+    content.columnconfigure(0, weight=1)
+    content.rowconfigure(0, weight=1)
+
+    canvas = tk.Canvas(
+        content,
+        bg="#101417",
+        highlightthickness=0,
+        yscrollincrement=116,
+        takefocus=True,
+    )
+    scrollbar = ttk.Scrollbar(content, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=scrollbar.set)
+    canvas.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    canvas.bind("<MouseWheel>", handle_daystream_wheel)
+    canvas.bind("<Button-1>", lambda _event: canvas.focus_set())
+    canvas.bind("<Home>", lambda _event: scroll_daystream_to(date.today().isoformat()))
+    canvas.bind("<End>", lambda _event: scroll_daystream_to_most_recent())
+    canvas.bind("<Key-t>", lambda _event: scroll_daystream_to(date.today().isoformat()))
+    canvas.bind("<Key-T>", lambda _event: scroll_daystream_to(date.today().isoformat()))
+    canvas.bind("<Key-m>", lambda _event: scroll_daystream_to_most_recent())
+    canvas.bind("<Key-M>", lambda _event: scroll_daystream_to_most_recent())
+    canvas.bind("<Return>", handle_daystream_enter)
+    canvas.bind("<space>", handle_daystream_preview)
+    canvas.bind("<Key-n>", lambda _event: create_selected_temporal_day())
+    canvas.bind("<Key-N>", lambda _event: create_selected_temporal_day())
+    canvas.bind(
+        "<Key-r>",
+        lambda _event: dispatch(
+            {"type": "SET_PRESENTATION", "mode": "control-panel"}
+        ),
+    )
+    canvas.bind(
+        "<Key-R>",
+        lambda _event: dispatch(
+            {"type": "SET_PRESENTATION", "mode": "control-panel"}
+        ),
+    )
+    for sequence, offset in [
+        ("<Left>", -1),
+        ("<Right>", 1),
+        ("<Up>", -7),
+        ("<Down>", 7),
+    ]:
+        canvas.bind(
+            sequence,
+            lambda _event, amount=offset: move_daystream_selection(amount),
+        )
+    g["widgets"]["daystream"] = canvas
+
+    rail = tk.Frame(
+        content,
+        bg=COLORS["panel"],
+        width=190,
+        padx=10,
+        pady=10,
+    )
+    rail.grid(row=0, column=2, sticky="ns", padx=(8, 0))
+    rail.grid_propagate(False)
+    g["widgets"]["temporal-rail"] = rail
+
+    exceptions = tk.Frame(frame, bg=COLORS["panel"], padx=10, pady=8)
+    exceptions.grid(row=exceptions_row, column=0, sticky="ew", pady=(8, 0))
+    exceptions.columnconfigure(0, weight=1)
+    tk.Label(
+        exceptions,
+        text="UNPLACED / NON-TEMPORAL ENTRIES",
+        bg=COLORS["panel"],
+        fg=COLORS["accent"],
+        font=("Segoe UI Semibold", 9),
+        anchor="w",
+    ).grid(row=0, column=0, sticky="ew")
+    shelf = ttk.Treeview(
+        exceptions,
+        columns=("kind", "modified"),
+        show="tree headings",
+        height=min(4, max(1, len(temporal["exceptions"]))),
+        selectmode="browse",
+    )
+    shelf.heading("#0", text="Entry")
+    shelf.heading("kind", text="Kind")
+    shelf.heading("modified", text="Modified")
+    shelf.column("#0", width=520)
+    shelf.column("kind", width=100)
+    shelf.column("modified", width=190)
+    shelf.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+    shelf_entries = {}
+    for exception in temporal["exceptions"]:
+        entry = exception["entry"]
+        item = shelf.insert(
+            "",
+            "end",
+            text=entry["name"],
+            values=(entry["visual-kind"], format_timestamp(entry.get("modified"))),
+        )
+        shelf_entries[item] = entry
+    shelf.bind(
+        "<Double-1>",
+        lambda _event: open_temporal_shelf_selection(shelf, shelf_entries),
+    )
+    g["widgets"]["temporal-shelf"] = shelf
+
+    project_daystream()
+    project_temporal_rail()
+    canvas.after_idle(position_daystream_initially)
+
+
+def project_daystream():
+    canvas = g["widgets"].get("daystream")
+    if not canvas or not canvas.winfo_exists():
+        return
+    canvas.delete("all")
+    g["temporal-cell-items"].clear()
+    g["temporal-row-by-date"].clear()
+    temporal = g["state"]["model"]["temporal"]
+    node_by_date = temporal["node-by-date"]
+    first_day, last_day = daystream_bounds(temporal)
+
+    left = 76
+    top = 68
+    cell_width = 108
+    cell_height = 108
+    week_height = 116
+    weekday_labels = ["月 MON", "火 TUE", "水 WED", "木 THU", "金 FRI", "土 SAT", "日 SUN"]
+    for column, label in enumerate(weekday_labels):
+        canvas.create_text(
+            left + column * cell_width + cell_width / 2,
+            24,
+            text=label,
+            fill=COLORS["quiet"],
+            font=("Segoe UI Semibold", 9),
+        )
+
+    current = first_day
+    row = 0
+    previous_month = None
+    today_key = date.today().isoformat()
+    while current <= last_day:
+        week_number = current.isocalendar().week
+        y = top + row * week_height
+        canvas.create_text(
+            38,
+            y + cell_height / 2,
+            text=f"W{week_number:02d}",
+            fill="#68747d",
+            font=("Cascadia Mono", 9),
+        )
+        for column in range(7):
+            day = current + timedelta(days=column)
+            key = day.isoformat()
+            node = node_by_date.get(key)
+            x = left + column * cell_width
+            if day.month != previous_month:
+                canvas.create_text(
+                    x + 6,
+                    y - 8,
+                    text=day.strftime("%Y  %B").upper(),
+                    anchor="sw",
+                    fill=COLORS["accent"],
+                    font=("Segoe UI Semibold", 9),
+                )
+                previous_month = day.month
+            selected = g["temporal-selected"] == key
+            recently_modified = temporal_node_is_recent(node)
+            fill = "#20272d" if node else "#151a1e"
+            if key == today_key:
+                fill = "#26343c"
+            outline = (
+                COLORS["selected"]
+                if selected
+                else COLORS["accent"]
+                if recently_modified
+                else "#343d44"
+            )
+            width = 3 if selected else 2 if recently_modified else 1
+            rectangle = canvas.create_rectangle(
+                x,
+                y,
+                x + cell_width - 6,
+                y + cell_height,
+                fill=fill,
+                outline=outline,
+                width=width,
+            )
+            items = [rectangle]
+            items.append(
+                canvas.create_text(
+                    x + 9,
+                    y + 8,
+                    text=f"{day.day:>2}{' ◇' if key == today_key else ''}",
+                    anchor="nw",
+                    fill=COLORS["text"] if day <= date.today() else "#77828a",
+                    font=("Segoe UI Semibold", 10),
+                )
+            )
+            if node:
+                lines = temporal_node_lines(node)
+                items.append(
+                    canvas.create_text(
+                        x + 9,
+                        y + 33,
+                        text="\n".join(lines),
+                        anchor="nw",
+                        fill="#cbd5db",
+                        font=("Segoe UI", 8),
+                        width=cell_width - 22,
+                    )
+                )
+            g["temporal-cell-items"][key] = items
+            g["temporal-row-by-date"][key] = row
+            tag = f"temporal:{key}"
+            for item in items:
+                canvas.addtag_withtag(tag, item)
+            canvas.tag_bind(
+                tag,
+                "<Button-1>",
+                lambda _event, day_key=key: select_temporal_day(day_key),
+            )
+            canvas.tag_bind(
+                tag,
+                "<Double-Button-1>",
+                lambda event, day_key=key: smart_open_temporal_day(
+                    day_key,
+                    control=bool(event.state & 0x0004),
+                    shift=bool(event.state & 0x0001),
+                    alt=bool(event.state & 0x00020000),
+                ),
+            )
+            canvas.tag_bind(
+                tag,
+                "<Button-3>",
+                lambda event, day_key=key: open_temporal_context_menu(
+                    event,
+                    day_key,
+                ),
+            )
+        current += timedelta(days=7)
+        row += 1
+
+    total_height = top + row * week_height + 12
+    canvas.configure(
+        scrollregion=(0, 0, left + 7 * cell_width + 12, total_height)
+    )
+
+
+def project_temporal_rail():
+    rail = g["widgets"]["temporal-rail"]
+    for child in rail.winfo_children():
+        child.destroy()
+    temporal = g["state"]["model"]["temporal"]
+    counts = {}
+    for node in temporal["nodes"]:
+        key = node["date"][:7]
+        counts[key] = counts.get(key, 0) + len(node["canonical"]) + len(node["associated"])
+
+    tk.Label(
+        rail,
+        text="TEMPORAL BODY",
+        bg=COLORS["panel"],
+        fg=COLORS["accent"],
+        font=("Segoe UI Semibold", 9),
+    ).pack(anchor="w", pady=(0, 8))
+    years = sorted({key[:4] for key in counts})
+    for year in years:
+        tk.Label(
+            rail,
+            text=year,
+            bg=COLORS["panel"],
+            fg=COLORS["text"],
+            font=("Segoe UI Semibold", 11),
+        ).pack(anchor="w", pady=(6, 2))
+        for month in range(1, 13):
+            key = f"{year}-{month:02d}"
+            count = counts.get(key, 0)
+            mark = "•" * min(6, count) if count else "·"
+            button = tk.Button(
+                rail,
+                text=f"{date(2000, month, 1).strftime('%b')}  {mark}",
+                command=lambda month_key=key: scroll_daystream_to_month(month_key),
+                bg=COLORS["panel"],
+                fg=COLORS["text"] if count else "#66717a",
+                activebackground=COLORS["panel-2"],
+                activeforeground=COLORS["text"],
+                relief="flat",
+                anchor="w",
+                padx=4,
+                pady=1,
+            )
+            button.pack(fill="x")
+
+
+def daystream_bounds(temporal):
+    today = date.today()
+    if temporal["earliest-date"]:
+        earliest = date.fromisoformat(temporal["earliest-date"])
+        recent = date.fromisoformat(temporal["most-recent-date"])
+    else:
+        earliest = today
+        recent = today
+    first = earliest - timedelta(days=earliest.weekday())
+    future_weeks = g["state"]["model"]["temporal-view"]["future-context-weeks"]
+    last = recent + timedelta(days=7 * future_weeks)
+    last += timedelta(days=6 - last.weekday())
+    return first, last
+
+
+def temporal_node_lines(node):
+    lines = []
+    if node["canonical"]:
+        lines.append(f"● {node['canonical'][0]['entry']['name']}")
+        if len(node["canonical"]) > 1:
+            lines.append(f"  +{len(node['canonical']) - 1} canonical")
+    if node["associated"]:
+        first = node["associated"][0]["entry"]["name"]
+        lines.append(f"▣ {first}")
+        if len(node["associated"]) > 1:
+            lines.append(f"  +{len(node['associated']) - 1} associated")
+    return lines[:3]
+
+
+def temporal_node_is_recent(node):
+    if not node or not node["latest-modified"]:
+        return False
+    try:
+        modified = datetime.fromisoformat(node["latest-modified"])
+        now = datetime.now(modified.tzinfo)
+        return now - modified <= timedelta(days=7)
+    except ValueError:
+        return False
+
+
+def select_temporal_day(day_key):
+    previous = g["temporal-selected"]
+    g["temporal-selected"] = day_key
+    restyle_temporal_cell(previous)
+    restyle_temporal_cell(day_key)
+    g["widgets"]["daystream"].focus_set()
+
+
+def restyle_temporal_cell(day_key):
+    if not day_key:
+        return
+    items = g["temporal-cell-items"].get(day_key)
+    if not items:
+        return
+    node = g["state"]["model"]["temporal"]["node-by-date"].get(day_key)
+    selected = g["temporal-selected"] == day_key
+    recent = temporal_node_is_recent(node)
+    outline = (
+        COLORS["selected"]
+        if selected
+        else COLORS["accent"]
+        if recent
+        else "#343d44"
+    )
+    width = 3 if selected else 2 if recent else 1
+    g["widgets"]["daystream"].itemconfigure(
+        items[0],
+        outline=outline,
+        width=width,
+    )
+
+
+def move_daystream_selection(offset):
+    temporal = g["state"]["model"]["temporal"]
+    selected = g["temporal-selected"] or temporal["most-recent-date"]
+    if not selected:
+        selected = date.today().isoformat()
+    target = (date.fromisoformat(selected) + timedelta(days=offset)).isoformat()
+    if target not in g["temporal-row-by-date"]:
+        return "break"
+    select_temporal_day(target)
+    scroll_daystream_to(target)
+    return "break"
+
+
+def handle_daystream_enter(_event=None):
+    if g["temporal-selected"]:
+        smart_open_temporal_day(g["temporal-selected"])
+    return "break"
+
+
+def handle_daystream_preview(_event=None):
+    if not g["temporal-selected"]:
+        return "break"
+    node = g["state"]["model"]["temporal"]["node-by-date"].get(
+        g["temporal-selected"]
+    )
+    if node:
+        open_temporal_cockpit(g["temporal-selected"], node)
+    return "break"
+
+
+def handle_daystream_wheel(event):
+    canvas = g["widgets"]["daystream"]
+    direction = -1 if event.delta > 0 else 1
+    if event.state & 0x0004:
+        weeks = 52
+    elif event.state & 0x0001:
+        weeks = 4
+    else:
+        weeks = 1
+    canvas.yview_scroll(direction * weeks, "units")
+    return "break"
+
+
+def position_daystream_initially():
+    temporal = g["state"]["model"]["temporal"]
+    initial = g["state"]["model"]["temporal-view"]["initial-position"]
+    if initial == "today":
+        target = date.today().isoformat()
+    elif initial == "earliest":
+        target = temporal["earliest-date"]
+    else:
+        target = temporal["most-recent-date"]
+    if target:
+        g["temporal-selected"] = target
+        project_daystream()
+        scroll_daystream_to(target)
+
+
+def scroll_daystream_to_most_recent():
+    target = g["state"]["model"]["temporal"]["most-recent-date"]
+    if target:
+        select_temporal_day(target)
+        scroll_daystream_to(target)
+
+
+def scroll_daystream_to_month(month_key):
+    candidates = sorted(
+        key for key in g["temporal-row-by-date"] if key.startswith(month_key)
+    )
+    if candidates:
+        select_temporal_day(candidates[0])
+        scroll_daystream_to(candidates[0])
+
+
+def scroll_daystream_to(day_key):
+    canvas = g["widgets"].get("daystream")
+    row = g["temporal-row-by-date"].get(day_key)
+    if canvas is None or row is None:
+        dispatch(
+            {
+                "type": "SET_STATUS",
+                "text": f"{day_key} is outside this folder's visible temporal range.",
+            }
+        )
+        return
+    bounds = canvas.bbox("all")
+    if not bounds:
+        return
+    desired_y = max(0, 68 + row * 116 - canvas.winfo_height() * 0.55)
+    total = max(1, bounds[3] - bounds[1])
+    canvas.yview_moveto(min(1.0, desired_y / total))
+
+
+def smart_open_temporal_day(day_key, control=False, shift=False, alt=False):
+    temporal = g["state"]["model"]["temporal"]
+    node = temporal["node-by-date"].get(day_key)
+    select_temporal_day(day_key)
+
+    if shift:
+        create_temporal_day(day_key, navigate=True)
+        return
+    if alt:
+        reveal_temporal_node(node)
+        return
+    if node and len(node["canonical"]) == 1 and not control:
+        open_entry(node["canonical"][0]["entry"])
+        return
+    if node:
+        open_temporal_cockpit(day_key, node)
+        return
+    if messagebox.askyesno(
+        f"Create {day_key}?",
+        f"No entry exists for {day_key}.\n\nCreate the canonical day folder?",
+        parent=g["tk"],
+    ):
+        create_temporal_day(day_key, navigate=True)
+
+
+def create_selected_temporal_day():
+    day_key = g["temporal-selected"] or date.today().isoformat()
+    create_temporal_day(day_key, navigate=True)
+    return "break"
+
+
+def reveal_temporal_node(node):
+    if not node:
+        open_os_path(g["state"]["folder"])
+        return
+    associations = node["canonical"] + node["associated"]
+    if len(associations) == 1:
+        subprocess.Popen(["explorer", "/select,", associations[0]["entry"]["path"]])
+    else:
+        open_os_path(g["state"]["folder"])
+
+
+def open_temporal_context_menu(event, day_key):
+    select_temporal_day(day_key)
+    node = g["state"]["model"]["temporal"]["node-by-date"].get(day_key)
+    menu = tk.Menu(
+        g["tk"],
+        tearoff=False,
+        bg=COLORS["panel"],
+        fg=COLORS["text"],
+        activebackground="#375d78",
+        activeforeground=COLORS["text"],
+    )
+    menu.add_command(
+        label="Smart open",
+        command=lambda: smart_open_temporal_day(day_key),
+    )
+    menu.add_command(
+        label="Open temporal cockpit",
+        command=lambda: (
+            open_temporal_cockpit(day_key, node)
+            if node
+            else smart_open_temporal_day(day_key)
+        ),
+    )
+    menu.add_command(
+        label="Create canonical folder",
+        command=lambda: create_temporal_day(day_key, navigate=True),
+    )
+    menu.add_separator()
+    menu.add_command(
+        label="Reveal matching entries",
+        command=lambda: reveal_temporal_node(node),
+    )
+    menu.tk_popup(event.x_root, event.y_root)
+
+
+def create_dated_entry_dialog():
+    initial = g["temporal-selected"] or date.today().isoformat()
+    day_key = simpledialog.askstring(
+        "Create dated entry",
+        "Date (YYYY-MM-DD):",
+        initialvalue=initial,
+        parent=g["tk"],
+    )
+    if not day_key:
+        return
+    try:
+        normalized = date.fromisoformat(day_key.strip()).isoformat()
+    except ValueError:
+        messagebox.showerror(
+            "Invalid date",
+            "Use a valid ISO date such as 2026-06-21.",
+            parent=g["tk"],
+        )
+        return
+    create_temporal_day(normalized, navigate=True)
+
+
+def create_temporal_day(day_key, navigate):
+    target = Path(g["state"]["folder"]) / day_key
+    try:
+        target.mkdir()
+    except FileExistsError:
+        if not target.is_dir():
+            messagebox.showerror(
+                "Cannot create day",
+                f"An entry named {day_key} already exists and is not a folder.",
+                parent=g["tk"],
+            )
+            return
+    except OSError as error:
+        dispatch({"type": "SET_STATUS", "text": str(error)})
+        return
+    if navigate:
+        dispatch({"type": "NAVIGATE", "path": str(target), "remember": True})
+    else:
+        dispatch({"type": "REFRESH"})
+
+
+def open_temporal_cockpit(day_key, node):
+    window = tk.Toplevel(g["tk"])
+    window.title(f"Temporal node · {day_key}")
+    window.geometry("720x430")
+    window.transient(g["tk"])
+    window.grab_set()
+    window.configure(bg=COLORS["background"])
+    window.columnconfigure(0, weight=1)
+    window.rowconfigure(2, weight=1)
+
+    parsed = date.fromisoformat(day_key)
+    tk.Label(
+        window,
+        text=parsed.strftime("%A · %B %d, %Y"),
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+        font=("Segoe UI Semibold", 18),
+        anchor="w",
+    ).grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 2))
+    tk.Label(
+        window,
+        text="A temporal gathering point for ordinary filesystem entries.",
+        bg=COLORS["background"],
+        fg=COLORS["quiet"],
+        anchor="w",
+    ).grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 10))
+
+    rows = node["canonical"] + node["associated"]
+    tree = ttk.Treeview(
+        window,
+        columns=("association", "kind", "modified"),
+        show="tree headings",
+        selectmode="browse",
+    )
+    tree.heading("#0", text="Entry")
+    tree.heading("association", text="Association")
+    tree.heading("kind", text="Kind")
+    tree.heading("modified", text="Modified")
+    tree.column("#0", width=320)
+    tree.column("association", width=100)
+    tree.column("kind", width=90)
+    tree.column("modified", width=160)
+    tree.grid(row=2, column=0, sticky="nsew", padx=16)
+    entries = {}
+    for association in rows:
+        entry = association["entry"]
+        item = tree.insert(
+            "",
+            "end",
+            text=entry["name"],
+            values=(
+                association["confidence"],
+                entry["visual-kind"],
+                format_timestamp(entry.get("modified")),
+            ),
+        )
+        entries[item] = entry
+
+    def selected_entry():
+        selected = tree.selection()
+        return entries.get(selected[0]) if selected else None
+
+    def open_selected():
+        entry = selected_entry()
+        if entry:
+            window.destroy()
+            open_entry(entry)
+
+    def reveal_selected():
+        entry = selected_entry()
+        if entry:
+            subprocess.Popen(["explorer", "/select,", entry["path"]])
+
+    footer = tk.Frame(window, bg=COLORS["background"], padx=16, pady=14)
+    footer.grid(row=3, column=0, sticky="ew")
+    for column, (label, command) in enumerate(
+        [
+            ("Open selected", open_selected),
+            ("Reveal selected", reveal_selected),
+            (
+                "Create canonical folder",
+                lambda: (
+                    window.destroy(),
+                    create_temporal_day(day_key, navigate=True),
+                ),
+            ),
+            ("Close", window.destroy),
+        ]
+    ):
+        ttk.Button(
+            footer,
+            text=label,
+            command=command,
+            style="Living.TButton",
+        ).grid(row=0, column=column, padx=(0, 8))
+    tree.bind("<Double-1>", lambda _event: open_selected())
+    if rows:
+        first = tree.get_children()[0]
+        tree.selection_set(first)
+        tree.focus(first)
+
+
+def open_temporal_shelf_selection(tree, entries):
+    selected = tree.selection()
+    if selected:
+        open_entry(entries[selected[0]])
+
+
+def format_timestamp(value):
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value).strftime("%Y-%m-%d %I:%M %p")
+    except ValueError:
+        return str(value)
+
+
+def project_actions(show_empty_message=True):
     actions = g["widgets"].get("actions")
     if not actions or not actions.winfo_exists():
         return
@@ -521,7 +1308,7 @@ def project_actions():
             widget.configure(state="disabled")
         widget.grid(row=number // 7, column=number % 7, padx=(0, 5), pady=(0, 5))
 
-    if not buttons:
+    if not buttons and show_empty_message:
         tk.Label(
             actions,
             text="No folder buttons yet. Use “Edit buttons…” to add navigation or commands.",
