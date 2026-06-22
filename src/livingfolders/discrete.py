@@ -354,6 +354,41 @@ def reduce(state, event):
         )
         effects.append({"type": "PROJECT_MAP"})
 
+    elif name == "DELETE_MAP_TEXT":
+        texts = [
+            item
+            for item in state["model"]["map-texts"]
+            if item["id"] != event["text-id"]
+        ]
+        z_order = [
+            key
+            for key in state["model"]["map-z-order"]
+            if key != f"text:{event['text-id']}"
+        ]
+        state["model"]["map-texts"] = texts
+        state["model"]["map-z-order"] = z_order
+        state["selected-text"] = None
+        state["group-selection"] = [
+            key
+            for key in state["group-selection"]
+            if key != f"text:{event['text-id']}"
+        ]
+        effects.extend(
+            [
+                {
+                    "type": "WRITE_MAP_TEXTS",
+                    "folder": state["folder"],
+                    "texts": texts,
+                },
+                {
+                    "type": "WRITE_MAP_Z_ORDER",
+                    "folder": state["folder"],
+                    "z-order": z_order,
+                },
+                {"type": "PROJECT_MAP"},
+            ]
+        )
+
     elif name == "UPSERT_MAP_IMAGE":
         images = deepcopy(state["model"]["map-images"])
         z_order = list(state["model"]["map-z-order"])

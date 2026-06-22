@@ -2365,9 +2365,11 @@ def handle_map_double_click(event):
             return
         if item in g["map-item-text-id"]:
             text_item = find_map_text(g["map-item-text-id"][item])
-            edited = edit_map_text_dialog(text_item)
-            if edited:
+            action, edited = edit_map_text_dialog(text_item, editing=True)
+            if action == "save":
                 dispatch({"type": "UPSERT_MAP_TEXT", "text-item": edited})
+            elif action == "delete":
+                dispatch({"type": "DELETE_MAP_TEXT", "text-id": text_item["id"]})
             return
         if item in g["map-item-entry"]:
             name = g["map-item-entry"][item]
@@ -2382,7 +2384,7 @@ def handle_map_double_click(event):
                 return
             open_entry_by_name(name)
             return
-    created = edit_map_text_dialog(
+    action, created = edit_map_text_dialog(
         {
             "id": str(uuid.uuid4()),
             "text": "",
@@ -2395,9 +2397,10 @@ def handle_map_double_click(event):
             "region-line-width": "thick",
             "width": 320,
             "height": 180,
-        }
+        },
+        editing=False,
     )
-    if created and created["text"].strip():
+    if action == "save" and created["text"].strip():
         dispatch({"type": "UPSERT_MAP_TEXT", "text-item": created})
 
 
@@ -2483,9 +2486,9 @@ def import_image_paths(paths, x, y):
         dispatch({"type": "SET_STATUS", "text": f"Imported {imported} image(s)."})
 
 
-def edit_map_text_dialog(text_item):
+def edit_map_text_dialog(text_item, editing):
     """Collect annotation text and presentation choices in a modal editor."""
-    result = {"value": None}
+    result = {"action": "cancel", "value": None}
     window = tk.Toplevel(g["tk"])
     window.title("Map Text")
     window.geometry("640x470")
@@ -2620,26 +2623,48 @@ def edit_map_text_dialog(text_item):
         updated.setdefault("width", 320)
         updated.setdefault("height", 180)
         result["value"] = updated
+        result["action"] = "save"
         window.destroy()
+
+    column = 0
+    if editing:
+        def delete_text():
+            confirmed = messagebox.askyesno(
+                "Delete map text?",
+                "Remove this text from the Directory Map?",
+                icon="warning",
+                parent=window,
+            )
+            if confirmed:
+                result["action"] = "delete"
+                window.destroy()
+
+        ttk.Button(
+            buttons,
+            text="Delete",
+            command=delete_text,
+            style="Living.TButton",
+        ).grid(row=0, column=column, padx=(0, 8))
+        column += 1
 
     ttk.Button(
         buttons,
         text="Cancel",
         command=window.destroy,
         style="Living.TButton",
-    ).grid(row=0, column=0, padx=(0, 8))
+    ).grid(row=0, column=column, padx=(0, 8))
     ttk.Button(
         buttons,
         text="Save",
         command=accept,
         style="Living.TButton",
-    ).grid(row=0, column=1)
+    ).grid(row=0, column=column + 1)
 
     window.bind("<Escape>", lambda _event: window.destroy())
     window.protocol("WM_DELETE_WINDOW", window.destroy)
     editor.focus_set()
     window.wait_window()
-    return result["value"]
+    return result["action"], result["value"]
 
 
 def add_radio_group(parent, column, title, variable, choices):

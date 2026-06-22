@@ -156,6 +156,22 @@ class DiscreteEngineTests(unittest.TestCase):
         self.assertEqual(110, state["model"]["map-texts"][0]["y"])
         self.assertEqual("WRITE_MAP_TEXTS", effects[0]["type"])
 
+        state["selected-text"] = "note-1"
+        state["group-selection"] = ["text:note-1"]
+        state, effects = reduce(
+            state,
+            {"type": "DELETE_MAP_TEXT", "text-id": "note-1"},
+        )
+
+        self.assertEqual([], state["model"]["map-texts"])
+        self.assertEqual([], state["model"]["map-z-order"])
+        self.assertIsNone(state["selected-text"])
+        self.assertEqual([], state["group-selection"])
+        self.assertEqual(
+            ["WRITE_MAP_TEXTS", "WRITE_MAP_Z_ORDER", "PROJECT_MAP"],
+            [effect["type"] for effect in effects],
+        )
+
     def test_map_image_can_be_added_and_resized(self):
         state = initial_state()
         state["folder"] = "C:/map"
