@@ -1,15 +1,22 @@
 import json
+import hashlib
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import Image
+
 from livingfolders.core import (
     delete_immediate_file,
+    get_cached_image_path,
+    import_clipboard_image,
+    import_image_file,
     inspect_folder,
     save_code_trust,
     save_command_annotations,
     save_map_geometry,
+    save_map_images,
     save_map_texts,
     save_presentation,
     write_manifest_template,
@@ -17,6 +24,9 @@ from livingfolders.core import (
 
 
 class FolderModelTests(unittest.TestCase):
+    def description_path(self, folder):
+        return folder / ".living-folder" / "description.json"
+
     def test_project_root_is_inferred_and_python_is_detected(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
@@ -81,7 +91,7 @@ class FolderModelTests(unittest.TestCase):
             )
             saved = json.loads(path.read_text(encoding="utf-8"))
 
-            self.assertEqual("0.2", saved["living-folder"])
+            self.assertEqual("0.3", saved["living-folder"])
             self.assertEqual({"still": "here"}, saved["future-field"])
             self.assertEqual("directory-map", saved["presentation-mode"])
             self.assertFalse(path.with_suffix(path.suffix + ".tmp").exists())
@@ -167,8 +177,70 @@ class FolderModelTests(unittest.TestCase):
             model = inspect_folder(folder)
 
             self.assertEqual(texts, model["map-texts"])
-            raw = json.loads((folder / ".living-folder.json").read_text(encoding="utf-8"))
+            raw = json.loads(self.description_path(folder).read_text(encoding="utf-8"))
             self.assertEqual(texts, raw["directory-map"]["texts"])
+
+    def test_legacy_manifest_is_read_but_next_write_uses_directory_form(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            legacy = folder / ".living-folder.json"
+            legacy.write_text(
+                json.dumps({"title": "Legacy Place", "future": {"kept": True}}),
+                encoding="utf-8",
+            )
+
+            self.assertEqual("Legacy Place", inspect_folder(folder)["title"])
+            save_code_trust(folder, True)
+
+            current = json.loads(self.description_path(folder).read_text(encoding="utf-8"))
+            self.assertEqual("Legacy Place", current["title"])
+            self.assertEqual({"kept": True}, current["future"])
+            self.assertTrue(current["trust-runnable-code"])
+            self.assertTrue(legacy.exists())
+
+    def test_image_import_is_content_addressed_and_resize_is_cached(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            folder = root / "place"
+            folder.mkdir()
+            source = root / "sunset.png"
+            Image.new("RGB", (640, 320), "#336699").save(source)
+
+            image_item = import_image_file(folder, source, 25, 35)
+            save_map_images(folder, [image_item])
+            model = inspect_folder(folder)
+            asset = folder / ".living-folder" / "images" / image_item["asset"]
+            cache = get_cached_image_path(folder, image_item)
+
+            self.assertTrue(asset.exists())
+            self.assertEqual(64, len(asset.stem))
+            self.assertEqual(
+                asset.stem,
+                hashlib.sha256(asset.read_bytes()).hexdigest(),
+            )
+            self.assertTrue(cache.exists())
+            self.assertEqual([image_item], model["map-images"])
+            with Image.open(cache) as rendered:
+                self.assertEqual(
+                    (image_item["width"], image_item["height"]),
+                    rendered.size,
+                )
+
+    def test_clipboard_image_is_stored_as_hashed_png(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            image = Image.new("RGBA", (80, 60), (255, 0, 0, 128))
+
+            image_item = import_clipboard_image(folder, image, 10, 20)
+            asset = folder / ".living-folder" / "images" / image_item["asset"]
+
+            self.assertTrue(asset.exists())
+            self.assertEqual(".png", asset.suffix)
+            self.assertEqual(
+                asset.stem,
+                hashlib.sha256(asset.read_bytes()).hexdigest(),
+            )
+            self.assertEqual((80, 60), (image_item["width"], image_item["height"]))
 
 
 if __name__ == "__main__":

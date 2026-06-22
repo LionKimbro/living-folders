@@ -1,6 +1,6 @@
 {
   "document": {
-    "document-id": "living-folders.manifest.softspec.v0.2",
+    "document-id": "living-folders.manifest.softspec.v0.3",
     "title": "Living Folder Manifest SoftSpec",
     "tags": [
       "living-folders",
@@ -102,16 +102,37 @@
           }
         },
         "additional_keys": true
+      },
+      "map-image": {
+        "type": "object",
+        "description": "A graphical image element backed by a content-addressed asset.",
+        "keys": {
+          "id": "stable local identifier",
+          "asset": {
+            "type": "string",
+            "required": true,
+            "description": "Filename beneath .living-folder/images, conventionally <sha256>.<ext>."
+          },
+          "source-name": "original filename or clipboard.png",
+          "x": "integer canvas coordinate",
+          "y": "integer canvas coordinate",
+          "width": "integer rendered width",
+          "height": "integer rendered height"
+        },
+        "additional_keys": true
       }
     },
     "schemas": {
       "living-folder-manifest": {
         "title": "Living Folder Manifest",
-        "description": "A folder's small local constitution. Unknown keys are preserved.",
+        "description": "A folder's small local constitution stored at .living-folder/description.json. Unknown keys are preserved.",
         "rules": [
           "Omitting presentation-mode returns presentation authority to inference.",
           "buttons contains user-declared controls; runnable files may additionally be detected from the directory.",
           "directory-map geometry is keyed by the immediate child entry name.",
+          "directory-map images refer to content-addressed assets under .living-folder/images.",
+          "resize caches are derived artifacts under .living-folder/images/cache and are not authoritative.",
+          "Legacy .living-folder.json files are readable but deprecated; new writes use the directory form.",
           "The constitution augments the filesystem and never replaces it."
         ],
         "structure": {
@@ -146,6 +167,10 @@
                 "texts": {
                   "type": "array",
                   "items": "map-text"
+                },
+                "images": {
+                  "type": "array",
+                  "items": "map-image"
                 }
               },
               "additional_keys": true

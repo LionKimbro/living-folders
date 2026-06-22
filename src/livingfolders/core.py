@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import io
 import os
+import shutil
 import sys
 import uuid
 from pathlib import Path
 
+from PIL import Image, UnidentifiedImageError
 
-MANIFEST_NAME = ".living-folder.json"
-MANIFEST_ALIASES = (MANIFEST_NAME, ".directory-role.json", ".decorator.json")
+
+LIVING_FOLDER_DIR = ".living-folder"
+DESCRIPTION_NAME = "description.json"
+LEGACY_MANIFEST_NAMES = (
+    ".living-folder.json",
+    ".directory-role.json",
+    ".decorator.json",
+)
+IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 
 PRESENTATION_MODES = [
     "directory-map",
@@ -58,6 +69,7 @@ def inspect_folder(path):
     command_annotations = normalize_command_annotations(raw)
     geometry = normalize_map_geometry(raw)
     map_texts = normalize_map_texts(raw)
+    map_images = normalize_map_images(raw)
 
     return {
         "folder": str(folder),
@@ -79,6 +91,7 @@ def inspect_folder(path):
         ),
         "map-geometry": geometry,
         "map-texts": map_texts,
+        "map-images": map_images,
         "entries": entries,
     }
 
@@ -92,24 +105,36 @@ def normalize_folder_path(path):
 
 
 def read_manifest(folder):
-    for name in MANIFEST_ALIASES:
+    current = folder / LIVING_FOLDER_DIR / DESCRIPTION_NAME
+    if current.is_file():
+        return current, read_json_object(current)
+
+    for name in LEGACY_MANIFEST_NAMES:
         path = folder / name
         if not path.is_file():
             continue
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                data = json.load(handle)
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(f"Cannot read {path.name}: {error}") from error
-        if not isinstance(data, dict):
-            raise ValueError(f"{path.name} must contain a JSON object.")
-        return path, data
+        return path, read_json_object(path)
     return None, {}
+
+
+def read_json_object(path):
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Cannot read {path}: {error}") from error
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a JSON object.")
+    return data
 
 
 def read_entries(folder):
     entries = []
-    hidden = set(MANIFEST_ALIASES) | {".git", ".living-folders"}
+    hidden = set(LEGACY_MANIFEST_NAMES) | {
+        ".git",
+        ".living-folder",
+        ".living-folders",
+    }
     try:
         paths = sorted(folder.iterdir(), key=lambda item: item.name.lower())
     except OSError as error:
@@ -303,6 +328,39 @@ def normalize_map_texts(raw):
     return texts
 
 
+def normalize_map_images(raw):
+    section = raw.get("directory-map", {})
+    if not isinstance(section, dict):
+        raise ValueError("manifest.directory-map must be an object.")
+    source = section.get("images", [])
+    if not isinstance(source, list):
+        raise ValueError("manifest.directory-map.images must be an array.")
+
+    images = []
+    for number, value in enumerate(source, 1):
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"manifest.directory-map.images item {number} must be an object."
+            )
+        try:
+            images.append(
+                {
+                    "id": str(value.get("id", uuid.uuid4())),
+                    "asset": str(value["asset"]),
+                    "source-name": str(value.get("source-name", "")),
+                    "x": int(value.get("x", 40)),
+                    "y": int(value.get("y", 40)),
+                    "width": max(24, int(value.get("width", 240))),
+                    "height": max(24, int(value.get("height", 180))),
+                }
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                f"manifest.directory-map.images item {number} is malformed."
+            ) from error
+    return images
+
+
 def detect_runnable_buttons(folder, entries, annotations):
     buttons = []
     for entry in entries:
@@ -348,7 +406,8 @@ def resolve_navigation_target(folder, target):
 def write_manifest(folder, raw):
     """Atomically write a folder constitution while preserving unknown fields."""
     folder = normalize_folder_path(folder)
-    target = folder / MANIFEST_NAME
+    target = folder / LIVING_FOLDER_DIR / DESCRIPTION_NAME
+    target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(target.suffix + ".tmp")
     with temporary.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(raw, handle, indent=2, ensure_ascii=False)
@@ -409,6 +468,154 @@ def save_map_texts(folder, texts):
     return write_manifest(folder, raw)
 
 
+def save_map_images(folder, images):
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    section = raw.setdefault("directory-map", {})
+    section["images"] = images
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
+def import_image_file(folder, source, x, y):
+    """Copy one image into content-addressed storage and return its map record."""
+    folder = normalize_folder_path(folder)
+    source = Path(source).expanduser().resolve()
+    if not source.is_file():
+        raise ValueError(f"Image file not found: {source}")
+
+    try:
+        with Image.open(source) as image:
+            image.verify()
+        with Image.open(source) as image:
+            source_width, source_height = image.size
+    except (OSError, UnidentifiedImageError) as error:
+        raise ValueError(f"Not a supported image: {source.name}") from error
+
+    images_dir = folder / LIVING_FOLDER_DIR / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = source.suffix.lower()
+    encoded = None
+    if suffix in IMAGE_SUFFIXES:
+        digest = sha256_file(source)
+    else:
+        with Image.open(source) as image:
+            encoded = encode_png(image)
+        digest = hashlib.sha256(encoded).hexdigest()
+        suffix = ".png"
+
+    target = images_dir / f"{digest}{suffix}"
+    if not target.exists():
+        if encoded is None:
+            temporary = target.with_suffix(target.suffix + ".tmp")
+            shutil.copyfile(source, temporary)
+            os.replace(temporary, target)
+        else:
+            atomic_write_bytes(target, encoded)
+
+    width, height = fit_image_size(source_width, source_height, 320, 240)
+    return {
+        "id": str(uuid.uuid4()),
+        "asset": target.name,
+        "source-name": source.name,
+        "x": int(x),
+        "y": int(y),
+        "width": width,
+        "height": height,
+    }
+
+
+def import_clipboard_image(folder, image, x, y):
+    """Store an in-memory Pillow image by content hash and return its map record."""
+    folder = normalize_folder_path(folder)
+    images_dir = folder / LIVING_FOLDER_DIR / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    rgba = image.convert("RGBA")
+    encoded = encode_png(rgba)
+    digest = hashlib.sha256(encoded).hexdigest()
+    target = images_dir / f"{digest}.png"
+    if not target.exists():
+        atomic_write_bytes(target, encoded)
+
+    width, height = fit_image_size(rgba.width, rgba.height, 320, 240)
+    return {
+        "id": str(uuid.uuid4()),
+        "asset": target.name,
+        "source-name": "clipboard.png",
+        "x": int(x),
+        "y": int(y),
+        "width": width,
+        "height": height,
+    }
+
+
+def get_cached_image_path(folder, image_item):
+    """Return a cached rendered PNG for one map image size, creating it atomically."""
+    folder = normalize_folder_path(folder)
+    images_dir = folder / LIVING_FOLDER_DIR / "images"
+    source = images_dir / image_item["asset"]
+    if not source.is_file():
+        raise ValueError(f"Missing Living Folder image asset: {image_item['asset']}")
+
+    stem = Path(image_item["asset"]).stem
+    width = image_item["width"]
+    height = image_item["height"]
+    cache_dir = images_dir / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / f"{stem}-{width}x{height}.png"
+    if target.exists():
+        return target
+
+    try:
+        with Image.open(source) as image:
+            rendered = image.convert("RGBA")
+            rendered.thumbnail((width, height), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            left = (width - rendered.width) // 2
+            top = (height - rendered.height) // 2
+            canvas.alpha_composite(rendered, (left, top))
+            temporary = target.with_suffix(".png.tmp")
+            canvas.save(temporary, format="PNG")
+            os.replace(temporary, target)
+    except (OSError, UnidentifiedImageError) as error:
+        raise ValueError(f"Cannot render image asset: {source.name}") from error
+    return target
+
+
+def resolve_image_asset_path(folder, image_item):
+    folder = normalize_folder_path(folder)
+    return folder / LIVING_FOLDER_DIR / "images" / image_item["asset"]
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def encode_png(image):
+    stream = io.BytesIO()
+    image.convert("RGBA").save(stream, format="PNG")
+    return stream.getvalue()
+
+
+def atomic_write_bytes(path, data):
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("wb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def fit_image_size(width, height, max_width, max_height):
+    scale = min(max_width / width, max_height / height, 1.0)
+    return max(24, int(width * scale)), max(24, int(height * scale))
+
+
 def delete_immediate_file(folder, path):
     """Delete one immediate regular file after the GUI has confirmed intent."""
     folder = normalize_folder_path(folder)
@@ -422,9 +629,12 @@ def delete_immediate_file(folder, path):
 
 def write_manifest_template(path):
     folder = normalize_folder_path(path)
-    target = folder / MANIFEST_NAME
+    target = folder / LIVING_FOLDER_DIR / DESCRIPTION_NAME
     if target.exists():
-        raise ValueError(f"{target.name} already exists.")
+        raise ValueError(f"{target} already exists.")
+    legacy_path, _raw = read_manifest(folder)
+    if legacy_path:
+        raise ValueError(f"A Living Folder description already exists: {legacy_path}")
     entries = read_entries(folder)
     inferred = infer_presentation(folder, entries)
     raw = {}
@@ -432,13 +642,13 @@ def write_manifest_template(path):
     raw["role"] = inferred
     raw["purpose"] = infer_purpose(inferred)
     raw["buttons"] = []
-    raw["directory-map"] = {"items": {}, "texts": []}
+    raw["directory-map"] = {"items": {}, "texts": [], "images": []}
     return write_manifest(folder, raw)
 
 
 def ensure_manifest_identity(raw, folder):
     path = Path(folder)
-    raw.setdefault("living-folder", "0.2")
+    raw["living-folder"] = "0.3"
     raw.setdefault("title", prettify_name(path.name))
 
 

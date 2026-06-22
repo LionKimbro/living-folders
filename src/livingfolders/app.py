@@ -11,15 +11,23 @@ import uuid
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from PIL import Image, ImageGrab, ImageTk
+from tkinterdnd2 import DND_FILES, TkinterDnD
+
 from .core import (
     PRESENTATION_MODES,
     delete_immediate_file,
+    get_cached_image_path,
+    import_clipboard_image,
+    import_image_file,
     inspect_folder,
+    resolve_image_asset_path,
     resolve_navigation_target,
     save_buttons,
     save_code_trust,
     save_command_annotations,
     save_map_geometry,
+    save_map_images,
     save_map_texts,
     save_presentation,
 )
@@ -70,6 +78,10 @@ g = {
     "map-handles": set(),
     "map-text-items": {},
     "map-item-text-id": {},
+    "map-image-items": {},
+    "map-item-image-id": {},
+    "map-image-handles": set(),
+    "map-image-photos": {},
     "interaction": None,
 }
 
@@ -85,13 +97,15 @@ def run(path):
 
 
 def build_window():
-    root = tk.Tk()
+    root = TkinterDnD.Tk()
     root.withdraw()
     root.title("Living Folders")
     root.geometry("1240x820")
     root.minsize(860, 600)
     root.option_add("*tearOff", 0)
     root.protocol("WM_DELETE_WINDOW", close_application)
+    root.bind("<Control-v>", handle_global_paste)
+    root.bind("<Control-V>", handle_global_paste)
     root.configure(bg=COLORS["background"])
     root.columnconfigure(0, weight=1)
     root.rowconfigure(2, weight=1)
@@ -308,6 +322,8 @@ def route_effect(effect):
         save_map_geometry(effect["folder"], effect["geometry"])
     elif name == "WRITE_MAP_TEXTS":
         save_map_texts(effect["folder"], effect["texts"])
+    elif name == "WRITE_MAP_IMAGES":
+        save_map_images(effect["folder"], effect["images"])
     elif name == "PROJECT":
         project_everything()
     elif name == "PROJECT_ACTIONS":
@@ -388,6 +404,10 @@ def replace_body():
     g["map-handles"].clear()
     g["map-text-items"].clear()
     g["map-item-text-id"].clear()
+    g["map-image-items"].clear()
+    g["map-item-image-id"].clear()
+    g["map-image-handles"].clear()
+    g["map-image-photos"].clear()
 
     model = g["state"]["model"]
     if model["active-presentation"] == "directory-map":
@@ -491,10 +511,20 @@ def build_directory_map(parent):
     frame.columnconfigure(0, weight=1)
     frame.rowconfigure(1, weight=1)
 
-    actions = tk.Frame(frame, bg=COLORS["background"], padx=12, pady=8)
+    header = tk.Frame(frame, bg=COLORS["background"], padx=12, pady=8)
+    header.grid(row=0, column=0, sticky="ew")
+    header.columnconfigure(0, weight=1)
+
+    actions = tk.Frame(header, bg=COLORS["background"])
     actions.grid(row=0, column=0, sticky="ew")
     g["widgets"]["actions"] = actions
     project_actions()
+    ttk.Button(
+        header,
+        text="＋ Image…",
+        command=handle_add_image,
+        style="Living.TButton",
+    ).grid(row=0, column=1, sticky="e")
 
     canvas = tk.Canvas(
         frame,
@@ -513,6 +543,10 @@ def build_directory_map(parent):
     canvas.bind("<ButtonRelease-1>", handle_map_release)
     canvas.bind("<Double-Button-1>", handle_map_double_click)
     canvas.bind("<Delete>", handle_delete_key)
+    canvas.bind("<Control-v>", handle_paste_image)
+    canvas.bind("<Control-V>", handle_paste_image)
+    canvas.drop_target_register(DND_FILES)
+    canvas.dnd_bind("<<Drop>>", handle_image_drop)
     g["widgets"]["map"] = canvas
     project_map()
 
@@ -527,6 +561,10 @@ def project_map():
     g["map-handles"].clear()
     g["map-text-items"].clear()
     g["map-item-text-id"].clear()
+    g["map-image-items"].clear()
+    g["map-item-image-id"].clear()
+    g["map-image-handles"].clear()
+    g["map-image-photos"].clear()
     model = g["state"]["model"]
 
     for number, entry in enumerate(model["entries"]):
@@ -537,6 +575,8 @@ def project_map():
         draw_map_entry(canvas, entry, geometry)
     for text_item in model["map-texts"]:
         draw_map_text(canvas, text_item)
+    for image_item in model["map-images"]:
+        draw_map_image(canvas, image_item)
 
 
 def draw_map_entry(canvas, entry, geometry):
@@ -597,6 +637,46 @@ def draw_map_text(canvas, text_item):
     g["map-item-text-id"][item] = text_item["id"]
 
 
+def draw_map_image(canvas, image_item):
+    try:
+        cache_path = get_cached_image_path(g["state"]["folder"], image_item)
+        with Image.open(cache_path) as image:
+            photo = ImageTk.PhotoImage(image.copy())
+    except ValueError as error:
+        dispatch({"type": "SET_STATUS", "text": str(error)})
+        return
+
+    x = image_item["x"]
+    y = image_item["y"]
+    width = image_item["width"]
+    height = image_item["height"]
+    selected = g["state"]["selected-image"] == image_item["id"]
+    border = canvas.create_rectangle(
+        x,
+        y,
+        x + width,
+        y + height,
+        fill="#080a0c",
+        outline=COLORS["selected"] if selected else "#3c454d",
+        width=3 if selected else 1,
+    )
+    picture = canvas.create_image(x, y, image=photo, anchor="nw")
+    handle = canvas.create_rectangle(
+        x + width - 14,
+        y + height - 14,
+        x + width,
+        y + height,
+        fill="#ffffff",
+        outline="#111111",
+    )
+    items = [border, picture, handle]
+    g["map-image-items"][image_item["id"]] = items
+    g["map-image-photos"][image_item["id"]] = photo
+    for item in items:
+        g["map-item-image-id"][item] = image_item["id"]
+    g["map-image-handles"].add(handle)
+
+
 def default_geometry(number):
     column = number % 5
     row = number // 5
@@ -617,6 +697,24 @@ def handle_map_press(event):
         canvas.canvasx(event.x),
         canvas.canvasy(event.y),
     )
+    image_items = [item for item in reversed(items) if item in g["map-item-image-id"]]
+    if image_items:
+        item = image_items[0]
+        image_id = g["map-item-image-id"][item]
+        is_resize = item in g["map-image-handles"]
+        dispatch({"type": "SELECT_MAP_IMAGE", "image-id": image_id})
+        geometry = current_canvas_image_geometry(image_id)
+        g["interaction"] = {
+            "kind": "image",
+            "image-id": image_id,
+            "mode": "resize" if is_resize else "move",
+            "start-x": canvas.canvasx(event.x),
+            "start-y": canvas.canvasy(event.y),
+            "origin": geometry,
+            "preview": geometry.copy(),
+            "changed": False,
+        }
+        return
     text_items = [item for item in reversed(items) if item in g["map-item-text-id"]]
     if text_items:
         item = text_items[0]
@@ -677,6 +775,24 @@ def handle_map_motion(event):
         )
         return
 
+    if interaction["kind"] == "image":
+        if interaction["mode"] == "move":
+            preview = {
+                **origin,
+                "x": max(0, int(origin["x"] + dx)),
+                "y": max(0, int(origin["y"] + dy)),
+            }
+        else:
+            preview = {
+                **origin,
+                "width": max(24, int(origin["width"] + dx)),
+                "height": max(24, int(origin["height"] + dy)),
+            }
+        interaction["preview"] = preview
+        interaction["changed"] = True
+        position_canvas_image(interaction["image-id"], preview)
+        return
+
     if interaction["mode"] == "move":
         preview = {
             **origin,
@@ -710,6 +826,16 @@ def handle_map_release(_event):
                 }
             )
         return
+    if interaction["kind"] == "image":
+        if interaction["changed"]:
+            dispatch(
+                {
+                    "type": "MAP_IMAGE_GEOMETRY_COMMITTED",
+                    "image-id": interaction["image-id"],
+                    "geometry": interaction["preview"],
+                }
+            )
+        return
     if interaction["changed"]:
         dispatch(
             {
@@ -738,6 +864,10 @@ def handle_map_double_click(event):
         y,
     )
     for item in reversed(items):
+        if item in g["map-item-image-id"]:
+            image_item = find_map_image(g["map-item-image-id"][item])
+            open_os_path(resolve_image_asset_path(g["state"]["folder"], image_item))
+            return
         if item in g["map-item-text-id"]:
             text_item = find_map_text(g["map-item-text-id"][item])
             edited = edit_map_text_dialog(text_item)
@@ -760,6 +890,88 @@ def handle_map_double_click(event):
     )
     if created and created["text"].strip():
         dispatch({"type": "UPSERT_MAP_TEXT", "text-item": created})
+
+
+def handle_add_image():
+    path = filedialog.askopenfilename(
+        parent=g["tk"],
+        initialdir=g["state"]["folder"],
+        title="Add image to Directory Map",
+        filetypes=[
+            ("Image files", "*.png *.jpg *.jpeg *.gif *.bmp *.webp"),
+            ("All files", "*.*"),
+        ],
+    )
+    if not path:
+        return
+    import_image_paths([path], 80, 80)
+
+
+def handle_image_drop(event):
+    canvas = g["widgets"]["map"]
+    x = int(canvas.canvasx(event.x_root - canvas.winfo_rootx()))
+    y = int(canvas.canvasy(event.y_root - canvas.winfo_rooty()))
+    paths = list(g["tk"].tk.splitlist(event.data))
+    import_image_paths(paths, x, y)
+    return getattr(event, "action", "copy")
+
+
+def handle_paste_image(_event=None):
+    canvas = g["widgets"]["map"]
+    x = int(canvas.canvasx(max(40, canvas.winfo_width() // 2)))
+    y = int(canvas.canvasy(max(40, canvas.winfo_height() // 2)))
+    content = ImageGrab.grabclipboard()
+    if isinstance(content, Image.Image):
+        try:
+            image_item = import_clipboard_image(g["state"]["folder"], content, x, y)
+        except (OSError, ValueError) as error:
+            dispatch({"type": "SET_STATUS", "text": str(error)})
+            return "break"
+        dispatch({"type": "UPSERT_MAP_IMAGE", "image-item": image_item})
+        return "break"
+    if isinstance(content, list):
+        import_image_paths(content, x, y)
+        return "break"
+    dispatch({"type": "SET_STATUS", "text": "The clipboard does not contain an image."})
+    return "break"
+
+
+def handle_global_paste(event):
+    focus = event.widget.focus_get()
+    if focus and focus.winfo_class() in {"Entry", "TEntry", "Text", "TCombobox"}:
+        return None
+    if not g["state"]["model"]:
+        return None
+    if g["state"]["model"]["active-presentation"] != "directory-map":
+        return None
+    return handle_paste_image(event)
+
+
+def import_image_paths(paths, x, y):
+    imported = 0
+    failures = []
+    for number, path in enumerate(paths):
+        try:
+            image_item = import_image_file(
+                g["state"]["folder"],
+                path,
+                x + number * 24,
+                y + number * 24,
+            )
+        except (OSError, ValueError) as error:
+            failures.append(str(error))
+            continue
+        dispatch({"type": "UPSERT_MAP_IMAGE", "image-item": image_item})
+        imported += 1
+    if failures:
+        dispatch(
+            {
+                "type": "SET_STATUS",
+                "text": f"Imported {imported} image(s); {len(failures)} failed.",
+            }
+        )
+    elif imported:
+        dispatch({"type": "SET_STATUS", "text": f"Imported {imported} image(s)."})
 
 
 def edit_map_text_dialog(text_item):
@@ -890,11 +1102,33 @@ def map_text_color(value):
     }[value]
 
 
+def find_map_image(image_id):
+    for item in g["state"]["model"]["map-images"]:
+        if item["id"] == image_id:
+            return dict(item)
+    raise ValueError(f"Map image is no longer present: {image_id}")
+
+
 def handle_delete_key(_event=None):
     if not g["state"]["model"]:
         return
     if g["state"]["model"]["active-presentation"] != "directory-map":
         return
+
+    image_id = g["state"]["selected-image"]
+    if image_id:
+        image_item = find_map_image(image_id)
+        label = image_item["source-name"] or image_item["asset"]
+        confirmed = messagebox.askyesno(
+            "Remove image?",
+            f"Remove this image from the Directory Map?\n\n{label}",
+            icon="warning",
+            parent=g["tk"],
+        )
+        if confirmed:
+            dispatch({"type": "DELETE_MAP_IMAGE", "image-id": image_id})
+        return
+
     name = g["state"]["selected-entry"]
     if not name:
         return
@@ -931,6 +1165,18 @@ def current_canvas_geometry(name):
     }
 
 
+def current_canvas_image_geometry(image_id):
+    canvas = g["widgets"]["map"]
+    border = g["map-image-items"][image_id][0]
+    x1, y1, x2, y2 = canvas.coords(border)
+    return {
+        "x": int(x1),
+        "y": int(y1),
+        "width": int(x2 - x1),
+        "height": int(y2 - y1),
+    }
+
+
 def position_canvas_entry(name, geometry):
     canvas = g["widgets"]["map"]
     rectangle, text, handle = g["map-items"][name]
@@ -945,6 +1191,24 @@ def position_canvas_entry(name, geometry):
         handle,
         x + width - 12,
         y + height - 12,
+        x + width,
+        y + height,
+    )
+
+
+def position_canvas_image(image_id, geometry):
+    canvas = g["widgets"]["map"]
+    border, picture, handle = g["map-image-items"][image_id]
+    x = geometry["x"]
+    y = geometry["y"]
+    width = geometry["width"]
+    height = geometry["height"]
+    canvas.coords(border, x, y, x + width, y + height)
+    canvas.coords(picture, x, y)
+    canvas.coords(
+        handle,
+        x + width - 14,
+        y + height - 14,
         x + width,
         y + height,
     )

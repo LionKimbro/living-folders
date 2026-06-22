@@ -23,7 +23,7 @@ def main():
     app.describe_cmd("", "Open the Living Folders control panel.")
     app.describe_cmd("open", "Open the Living Folders control panel.")
     app.describe_cmd("inspect", "Print the normalized folder model as JSON.")
-    app.describe_cmd("init", "Create a starter .living-folder.json.")
+    app.describe_cmd("init", "Create a starter .living-folder/description.json.")
     app.main()
 
 

@@ -11,6 +11,7 @@ def initial_state():
         "trust-code": False,
         "selected-entry": None,
         "selected-text": None,
+        "selected-image": None,
         "status": "Ready.",
     }
 
@@ -38,6 +39,7 @@ def reduce(state, event):
         state["model"] = event["model"]
         state["selected-entry"] = None
         state["selected-text"] = None
+        state["selected-image"] = None
         state["trust-code"] = event["model"]["trust-runnable-code"]
         state["status"] = event.get("status", "Folder loaded.")
         effects.append({"type": "PROJECT"})
@@ -148,14 +150,75 @@ def reduce(state, event):
         )
         effects.append({"type": "PROJECT_MAP"})
 
+    elif name == "UPSERT_MAP_IMAGE":
+        images = deepcopy(state["model"]["map-images"])
+        updated = False
+        for number, item in enumerate(images):
+            if item["id"] == event["image-item"]["id"]:
+                images[number] = deepcopy(event["image-item"])
+                updated = True
+                break
+        if not updated:
+            images.append(deepcopy(event["image-item"]))
+        state["model"]["map-images"] = images
+        effects.append(
+            {
+                "type": "WRITE_MAP_IMAGES",
+                "folder": state["folder"],
+                "images": images,
+            }
+        )
+        effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "MAP_IMAGE_GEOMETRY_COMMITTED":
+        images = deepcopy(state["model"]["map-images"])
+        for item in images:
+            if item["id"] == event["image-id"]:
+                item.update(event["geometry"])
+                break
+        state["model"]["map-images"] = images
+        effects.append(
+            {
+                "type": "WRITE_MAP_IMAGES",
+                "folder": state["folder"],
+                "images": images,
+            }
+        )
+        effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "DELETE_MAP_IMAGE":
+        images = [
+            item
+            for item in state["model"]["map-images"]
+            if item["id"] != event["image-id"]
+        ]
+        state["model"]["map-images"] = images
+        state["selected-image"] = None
+        effects.append(
+            {
+                "type": "WRITE_MAP_IMAGES",
+                "folder": state["folder"],
+                "images": images,
+            }
+        )
+        effects.append({"type": "PROJECT_MAP"})
+
     elif name == "SELECT_ENTRY":
         state["selected-entry"] = event["entry-name"]
         state["selected-text"] = None
+        state["selected-image"] = None
         effects.append({"type": "PROJECT_MAP"})
 
     elif name == "SELECT_MAP_TEXT":
         state["selected-entry"] = None
         state["selected-text"] = event["text-id"]
+        state["selected-image"] = None
+        effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "SELECT_MAP_IMAGE":
+        state["selected-entry"] = None
+        state["selected-text"] = None
+        state["selected-image"] = event["image-id"]
         effects.append({"type": "PROJECT_MAP"})
 
     elif name == "SET_STATUS":

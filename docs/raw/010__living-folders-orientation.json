@@ -1,6 +1,6 @@
 {
   "document": {
-    "document-id": "living-folders.orientation.v0.2",
+    "document-id": "living-folders.orientation.v0.3",
     "title": "Living Folders Orientation",
     "tags": [
       "living-folders",
@@ -40,7 +40,7 @@
       "Directory Map is a presentation alongside Project Root, Workbench, Factory, Library, Gallery, Inbox, Vault, Warehouse, Hallway, and Ruin"
     ],
     "folder-buttons": [
-      "declared navigation and command buttons are stored in .living-folder.json",
+      "declared navigation and command buttons are stored in .living-folder/description.json",
       "navigation buttons do not require code trust",
       "command buttons and detected runnable files remain disabled until the user explicitly trusts local code",
       "the button editor adds, edits, and removes navigation or command buttons"
@@ -52,11 +52,26 @@
       "committed geometry is stored by entry name in the folder constitution",
       "double-clicking empty map space creates persistent styled text",
       "map text supports left, center, or right alignment; three font sizes; white, green, blue, or red color; dragging; and double-click re-editing"
+    ],
+    "map-images": [
+      "the Add Image button, native file drop, and Ctrl+V clipboard paste import images",
+      "original image bytes are stored by SHA-256 identity under .living-folder/images",
+      "map image position, width, and height live in description.json",
+      "resized renderings are cached under .living-folder/images/cache",
+      "map images can be dragged and resized using their lower-right handle",
+      "double-clicking a map image opens its stored original through the operating system"
+    ],
+    "storage": [
+      ".living-folder/description.json is the current folder constitution",
+      ".living-folder/images/<sha256>.<ext> stores imported originals",
+      ".living-folder/images/cache/<sha256>-<width>x<height>.png stores derived render caches",
+      "legacy .living-folder.json, .directory-role.json, and .decorator.json files remain readable",
+      "the first mutation of a legacy folder writes the current directory form while leaving the legacy file untouched"
     ]
   },
   "architecture": {
     "cli": "lionscliapp owns declaration, dispatch, persistent app configuration, and execpath.folder coercion.",
-    "world-model": "The filesystem plus .living-folder.json own durable folder reality.",
+    "world-model": "The filesystem plus .living-folder/description.json and its content-addressed image tree own durable folder reality.",
     "discrete-engine": "Semantic events reduce into compact navigation, trust, selection, and committed map state, producing explicit effects.",
     "continuity": "Tk pointer callbacks own in-progress map move and resize previews. Only release emits committed semantic meaning.",
     "projection": "Tk widgets and canvas items are downstream renderings and do not decide semantic truth.",

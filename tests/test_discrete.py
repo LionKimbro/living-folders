@@ -142,6 +142,50 @@ class DiscreteEngineTests(unittest.TestCase):
         self.assertEqual(110, state["model"]["map-texts"][0]["y"])
         self.assertEqual("WRITE_MAP_TEXTS", effects[0]["type"])
 
+    def test_map_image_can_be_added_and_resized(self):
+        state = initial_state()
+        state["folder"] = "C:/map"
+        state["model"] = {"map-images": []}
+        image_item = {
+            "id": "image-1",
+            "asset": "abc.png",
+            "source-name": "photo.png",
+            "x": 10,
+            "y": 20,
+            "width": 200,
+            "height": 100,
+        }
+
+        state, effects = reduce(
+            state,
+            {"type": "UPSERT_MAP_IMAGE", "image-item": image_item},
+        )
+
+        self.assertEqual([image_item], state["model"]["map-images"])
+        self.assertEqual("WRITE_MAP_IMAGES", effects[0]["type"])
+
+        state, effects = reduce(
+            state,
+            {
+                "type": "MAP_IMAGE_GEOMETRY_COMMITTED",
+                "image-id": "image-1",
+                "geometry": {"x": 40, "y": 50, "width": 300, "height": 220},
+            },
+        )
+
+        self.assertEqual(300, state["model"]["map-images"][0]["width"])
+        self.assertEqual(220, state["model"]["map-images"][0]["height"])
+        self.assertEqual("WRITE_MAP_IMAGES", effects[0]["type"])
+
+        state, effects = reduce(
+            state,
+            {"type": "DELETE_MAP_IMAGE", "image-id": "image-1"},
+        )
+
+        self.assertEqual([], state["model"]["map-images"])
+        self.assertIsNone(state["selected-image"])
+        self.assertEqual("WRITE_MAP_IMAGES", effects[0]["type"])
+
 
 if __name__ == "__main__":
     unittest.main()
