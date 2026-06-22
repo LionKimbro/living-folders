@@ -171,6 +171,11 @@
                 "images": {
                   "type": "array",
                   "items": "map-image"
+                },
+                "z-order": {
+                  "type": "array",
+                  "items": "string",
+                  "description": "Back-to-front layer keys such as entry:<name>, text:<id>, and image:<id>."
                 }
               },
               "additional_keys": true

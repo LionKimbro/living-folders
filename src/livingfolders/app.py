@@ -29,6 +29,7 @@ from .core import (
     save_map_geometry,
     save_map_images,
     save_map_texts,
+    save_map_z_order,
     save_presentation,
 )
 from .discrete import initial_state, reduce
@@ -324,6 +325,8 @@ def route_effect(effect):
         save_map_texts(effect["folder"], effect["texts"])
     elif name == "WRITE_MAP_IMAGES":
         save_map_images(effect["folder"], effect["images"])
+    elif name == "WRITE_MAP_Z_ORDER":
+        save_map_z_order(effect["folder"], effect["z-order"])
     elif name == "PROJECT":
         project_everything()
     elif name == "PROJECT_ACTIONS":
@@ -525,6 +528,12 @@ def build_directory_map(parent):
         command=handle_add_image,
         style="Living.TButton",
     ).grid(row=0, column=1, sticky="e")
+    ttk.Button(
+        header,
+        text="From Clipboard",
+        command=handle_paste_image,
+        style="Living.TButton",
+    ).grid(row=0, column=2, sticky="e", padx=(6, 0))
 
     canvas = tk.Canvas(
         frame,
@@ -543,6 +552,8 @@ def build_directory_map(parent):
     canvas.bind("<ButtonRelease-1>", handle_map_release)
     canvas.bind("<Double-Button-1>", handle_map_double_click)
     canvas.bind("<Delete>", handle_delete_key)
+    canvas.bind("<Prior>", handle_page_up)
+    canvas.bind("<Next>", handle_page_down)
     canvas.bind("<Control-v>", handle_paste_image)
     canvas.bind("<Control-V>", handle_paste_image)
     canvas.drop_target_register(DND_FILES)
@@ -567,16 +578,25 @@ def project_map():
     g["map-image-photos"].clear()
     model = g["state"]["model"]
 
-    for number, entry in enumerate(model["entries"]):
-        geometry = model["map-geometry"].get(
-            entry["name"],
-            default_geometry(number),
-        )
-        draw_map_entry(canvas, entry, geometry)
-    for text_item in model["map-texts"]:
-        draw_map_text(canvas, text_item)
-    for image_item in model["map-images"]:
-        draw_map_image(canvas, image_item)
+    entries = {item["name"]: item for item in model["entries"]}
+    texts = {item["id"]: item for item in model["map-texts"]}
+    images = {item["id"]: item for item in model["map-images"]}
+    entry_numbers = {
+        item["name"]: number for number, item in enumerate(model["entries"])
+    }
+
+    for key in model["map-z-order"]:
+        kind, identity = key.split(":", 1)
+        if kind == "entry" and identity in entries:
+            geometry = model["map-geometry"].get(
+                identity,
+                default_geometry(entry_numbers[identity]),
+            )
+            draw_map_entry(canvas, entries[identity], geometry)
+        elif kind == "text" and identity in texts:
+            draw_map_text(canvas, texts[identity])
+        elif kind == "image" and identity in images:
+            draw_map_image(canvas, images[identity])
 
 
 def draw_map_entry(canvas, entry, geometry):
@@ -1151,6 +1171,38 @@ def handle_delete_key(_event=None):
     )
     if confirmed:
         dispatch({"type": "DELETE_FILE", "path": entry["path"]})
+
+
+def handle_page_up(_event=None):
+    move_selected_map_layer(1)
+    return "break"
+
+
+def handle_page_down(_event=None):
+    move_selected_map_layer(-1)
+    return "break"
+
+
+def move_selected_map_layer(direction):
+    key = selected_map_layer_key()
+    if key:
+        dispatch(
+            {
+                "type": "MOVE_MAP_LAYER",
+                "key": key,
+                "direction": direction,
+            }
+        )
+
+
+def selected_map_layer_key():
+    if g["state"]["selected-image"]:
+        return f"image:{g['state']['selected-image']}"
+    if g["state"]["selected-text"]:
+        return f"text:{g['state']['selected-text']}"
+    if g["state"]["selected-entry"]:
+        return f"entry:{g['state']['selected-entry']}"
+    return None
 
 
 def current_canvas_geometry(name):

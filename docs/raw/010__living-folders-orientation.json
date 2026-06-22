@@ -59,7 +59,9 @@
       "map image position, width, and height live in description.json",
       "resized renderings are cached under .living-folder/images/cache",
       "map images can be dragged and resized using their lower-right handle",
-      "double-clicking a map image opens its stored original through the operating system"
+      "double-clicking a map image opens its stored original through the operating system",
+      "Page Up moves the selected file, folder, text, or image one layer toward the front",
+      "Page Down moves the selected element one layer toward the back"
     ],
     "storage": [
       ".living-folder/description.json is the current folder constitution",

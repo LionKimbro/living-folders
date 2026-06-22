@@ -70,6 +70,7 @@ def inspect_folder(path):
     geometry = normalize_map_geometry(raw)
     map_texts = normalize_map_texts(raw)
     map_images = normalize_map_images(raw)
+    map_z_order = normalize_map_z_order(raw, entries, map_texts, map_images)
 
     return {
         "folder": str(folder),
@@ -92,6 +93,7 @@ def inspect_folder(path):
         "map-geometry": geometry,
         "map-texts": map_texts,
         "map-images": map_images,
+        "map-z-order": map_z_order,
         "entries": entries,
     }
 
@@ -361,6 +363,31 @@ def normalize_map_images(raw):
     return images
 
 
+def normalize_map_z_order(raw, entries, texts, images):
+    section = raw.get("directory-map", {})
+    if not isinstance(section, dict):
+        raise ValueError("manifest.directory-map must be an object.")
+    source = section.get("z-order", [])
+    if not isinstance(source, list):
+        raise ValueError("manifest.directory-map.z-order must be an array.")
+
+    available = (
+        [f"entry:{item['name']}" for item in entries]
+        + [f"text:{item['id']}" for item in texts]
+        + [f"image:{item['id']}" for item in images]
+    )
+    available_set = set(available)
+    ordered = []
+    for value in source:
+        key = str(value)
+        if key in available_set and key not in ordered:
+            ordered.append(key)
+    for key in available:
+        if key not in ordered:
+            ordered.append(key)
+    return ordered
+
+
 def detect_runnable_buttons(folder, entries, annotations):
     buttons = []
     for entry in entries:
@@ -472,6 +499,14 @@ def save_map_images(folder, images):
     _path, raw = read_manifest(normalize_folder_path(folder))
     section = raw.setdefault("directory-map", {})
     section["images"] = images
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
+def save_map_z_order(folder, z_order):
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    section = raw.setdefault("directory-map", {})
+    section["z-order"] = z_order
     ensure_manifest_identity(raw, folder)
     return write_manifest(folder, raw)
 
@@ -642,7 +677,12 @@ def write_manifest_template(path):
     raw["role"] = inferred
     raw["purpose"] = infer_purpose(inferred)
     raw["buttons"] = []
-    raw["directory-map"] = {"items": {}, "texts": [], "images": []}
+    raw["directory-map"] = {
+        "items": {},
+        "texts": [],
+        "images": [],
+        "z-order": [],
+    }
     return write_manifest(folder, raw)
 
 

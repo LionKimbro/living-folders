@@ -114,7 +114,7 @@ class DiscreteEngineTests(unittest.TestCase):
     def test_map_text_can_be_created_and_moved(self):
         state = initial_state()
         state["folder"] = "C:/map"
-        state["model"] = {"map-texts": []}
+        state["model"] = {"map-texts": [], "map-z-order": []}
         text_item = {
             "id": "note-1",
             "text": "hello",
@@ -131,6 +131,7 @@ class DiscreteEngineTests(unittest.TestCase):
         )
 
         self.assertEqual([text_item], state["model"]["map-texts"])
+        self.assertEqual(["text:note-1"], state["model"]["map-z-order"])
         self.assertEqual("WRITE_MAP_TEXTS", effects[0]["type"])
 
         state, effects = reduce(
@@ -145,7 +146,7 @@ class DiscreteEngineTests(unittest.TestCase):
     def test_map_image_can_be_added_and_resized(self):
         state = initial_state()
         state["folder"] = "C:/map"
-        state["model"] = {"map-images": []}
+        state["model"] = {"map-images": [], "map-z-order": []}
         image_item = {
             "id": "image-1",
             "asset": "abc.png",
@@ -162,6 +163,7 @@ class DiscreteEngineTests(unittest.TestCase):
         )
 
         self.assertEqual([image_item], state["model"]["map-images"])
+        self.assertEqual(["image:image-1"], state["model"]["map-z-order"])
         self.assertEqual("WRITE_MAP_IMAGES", effects[0]["type"])
 
         state, effects = reduce(
@@ -183,8 +185,48 @@ class DiscreteEngineTests(unittest.TestCase):
         )
 
         self.assertEqual([], state["model"]["map-images"])
+        self.assertEqual([], state["model"]["map-z-order"])
         self.assertIsNone(state["selected-image"])
         self.assertEqual("WRITE_MAP_IMAGES", effects[0]["type"])
+
+    def test_page_layer_move_swaps_one_z_order_position(self):
+        state = initial_state()
+        state["folder"] = "C:/map"
+        state["model"] = {
+            "map-z-order": [
+                "entry:back.txt",
+                "text:note",
+                "image:front",
+            ]
+        }
+
+        state, effects = reduce(
+            state,
+            {
+                "type": "MOVE_MAP_LAYER",
+                "key": "text:note",
+                "direction": 1,
+            },
+        )
+
+        self.assertEqual(
+            ["entry:back.txt", "image:front", "text:note"],
+            state["model"]["map-z-order"],
+        )
+        self.assertEqual("WRITE_MAP_Z_ORDER", effects[0]["type"])
+
+        state, _effects = reduce(
+            state,
+            {
+                "type": "MOVE_MAP_LAYER",
+                "key": "text:note",
+                "direction": -1,
+            },
+        )
+        self.assertEqual(
+            ["entry:back.txt", "text:note", "image:front"],
+            state["model"]["map-z-order"],
+        )
 
 
 if __name__ == "__main__":

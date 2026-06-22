@@ -17,6 +17,7 @@ from livingfolders.core import (
     save_command_annotations,
     save_map_geometry,
     save_map_images,
+    save_map_z_order,
     save_map_texts,
     save_presentation,
     write_manifest_template,
@@ -241,6 +242,29 @@ class FolderModelTests(unittest.TestCase):
                 hashlib.sha256(asset.read_bytes()).hexdigest(),
             )
             self.assertEqual((80, 60), (image_item["width"], image_item["height"]))
+
+    def test_map_z_order_is_normalized_and_persisted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            (folder / "alpha.txt").write_text("alpha", encoding="utf-8")
+            text = {
+                "id": "note-1",
+                "text": "note",
+                "x": 1,
+                "y": 2,
+                "alignment": "left",
+                "font-size": "small",
+                "color": "white",
+            }
+            save_map_texts(folder, [text])
+            save_map_z_order(folder, ["text:note-1", "entry:alpha.txt"])
+
+            model = inspect_folder(folder)
+
+            self.assertEqual(
+                ["text:note-1", "entry:alpha.txt"],
+                model["map-z-order"],
+            )
 
 
 if __name__ == "__main__":

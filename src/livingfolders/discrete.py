@@ -115,6 +115,7 @@ def reduce(state, event):
 
     elif name == "UPSERT_MAP_TEXT":
         texts = deepcopy(state["model"]["map-texts"])
+        z_order = list(state["model"]["map-z-order"])
         updated = False
         for number, item in enumerate(texts):
             if item["id"] == event["text-item"]["id"]:
@@ -123,12 +124,21 @@ def reduce(state, event):
                 break
         if not updated:
             texts.append(deepcopy(event["text-item"]))
+            z_order.append(f"text:{event['text-item']['id']}")
         state["model"]["map-texts"] = texts
+        state["model"]["map-z-order"] = z_order
         effects.append(
             {
                 "type": "WRITE_MAP_TEXTS",
                 "folder": state["folder"],
                 "texts": texts,
+            }
+        )
+        effects.append(
+            {
+                "type": "WRITE_MAP_Z_ORDER",
+                "folder": state["folder"],
+                "z-order": z_order,
             }
         )
         effects.append({"type": "PROJECT_MAP"})
@@ -152,6 +162,7 @@ def reduce(state, event):
 
     elif name == "UPSERT_MAP_IMAGE":
         images = deepcopy(state["model"]["map-images"])
+        z_order = list(state["model"]["map-z-order"])
         updated = False
         for number, item in enumerate(images):
             if item["id"] == event["image-item"]["id"]:
@@ -160,12 +171,21 @@ def reduce(state, event):
                 break
         if not updated:
             images.append(deepcopy(event["image-item"]))
+            z_order.append(f"image:{event['image-item']['id']}")
         state["model"]["map-images"] = images
+        state["model"]["map-z-order"] = z_order
         effects.append(
             {
                 "type": "WRITE_MAP_IMAGES",
                 "folder": state["folder"],
                 "images": images,
+            }
+        )
+        effects.append(
+            {
+                "type": "WRITE_MAP_Z_ORDER",
+                "folder": state["folder"],
+                "z-order": z_order,
             }
         )
         effects.append({"type": "PROJECT_MAP"})
@@ -193,12 +213,43 @@ def reduce(state, event):
             if item["id"] != event["image-id"]
         ]
         state["model"]["map-images"] = images
+        z_order = [
+            key
+            for key in state["model"]["map-z-order"]
+            if key != f"image:{event['image-id']}"
+        ]
+        state["model"]["map-z-order"] = z_order
         state["selected-image"] = None
         effects.append(
             {
                 "type": "WRITE_MAP_IMAGES",
                 "folder": state["folder"],
                 "images": images,
+            }
+        )
+        effects.append(
+            {
+                "type": "WRITE_MAP_Z_ORDER",
+                "folder": state["folder"],
+                "z-order": z_order,
+            }
+        )
+        effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "MOVE_MAP_LAYER":
+        z_order = list(state["model"]["map-z-order"])
+        key = event["key"]
+        if key in z_order:
+            index = z_order.index(key)
+            target = index + event["direction"]
+            if 0 <= target < len(z_order):
+                z_order[index], z_order[target] = z_order[target], z_order[index]
+        state["model"]["map-z-order"] = z_order
+        effects.append(
+            {
+                "type": "WRITE_MAP_Z_ORDER",
+                "folder": state["folder"],
+                "z-order": z_order,
             }
         )
         effects.append({"type": "PROJECT_MAP"})
