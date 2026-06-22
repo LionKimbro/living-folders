@@ -49,7 +49,9 @@
       "immediate directory contents appear as movable and resizable rectangles",
       "folders are yellow, executables red, text blue, JSON light blue, images purple, and other files gray",
       "double-click follows folders or asks the operating system to open files",
-      "committed geometry is stored by entry name in the folder constitution"
+      "committed geometry is stored by entry name in the folder constitution",
+      "double-clicking empty map space creates persistent styled text",
+      "map text supports left, center, or right alignment; three font sizes; white, green, blue, or red color; dragging; and double-click re-editing"
     ]
   },
   "architecture": {

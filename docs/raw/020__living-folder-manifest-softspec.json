@@ -66,6 +66,42 @@
           "height": "integer, at least 44"
         },
         "additional_keys": true
+      },
+      "map-text": {
+        "type": "object",
+        "description": "A user-authored text annotation placed on the Directory Map.",
+        "keys": {
+          "id": "stable local identifier",
+          "text": "multiline text",
+          "x": "integer canvas coordinate",
+          "y": "integer canvas coordinate",
+          "alignment": {
+            "type": "string",
+            "vocabulary": {
+              "left": "Left-aligned lines.",
+              "center": "Centered lines.",
+              "right": "Right-aligned lines."
+            }
+          },
+          "font-size": {
+            "type": "string",
+            "vocabulary": {
+              "small": "Small map text.",
+              "medium": "Medium map text.",
+              "large": "Large map text."
+            }
+          },
+          "color": {
+            "type": "string",
+            "vocabulary": {
+              "white": "White text.",
+              "green": "Green text.",
+              "blue": "Blue text.",
+              "red": "Red text."
+            }
+          }
+        },
+        "additional_keys": true
       }
     },
     "schemas": {
@@ -106,6 +142,10 @@
                   "type": "object",
                   "key_type": "immediate child filename",
                   "value_type": "map-geometry"
+                },
+                "texts": {
+                  "type": "array",
+                  "items": "map-text"
                 }
               },
               "additional_keys": true

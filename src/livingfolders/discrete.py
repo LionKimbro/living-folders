@@ -10,6 +10,7 @@ def initial_state():
         "back-stack": [],
         "trust-code": False,
         "selected-entry": None,
+        "selected-text": None,
         "status": "Ready.",
     }
 
@@ -36,6 +37,7 @@ def reduce(state, event):
         state["folder"] = event["model"]["folder"]
         state["model"] = event["model"]
         state["selected-entry"] = None
+        state["selected-text"] = None
         state["trust-code"] = event["model"]["trust-runnable-code"]
         state["status"] = event.get("status", "Folder loaded.")
         effects.append({"type": "PROJECT"})
@@ -109,8 +111,51 @@ def reduce(state, event):
         )
         effects.append({"type": "PROJECT_MAP"})
 
+    elif name == "UPSERT_MAP_TEXT":
+        texts = deepcopy(state["model"]["map-texts"])
+        updated = False
+        for number, item in enumerate(texts):
+            if item["id"] == event["text-item"]["id"]:
+                texts[number] = deepcopy(event["text-item"])
+                updated = True
+                break
+        if not updated:
+            texts.append(deepcopy(event["text-item"]))
+        state["model"]["map-texts"] = texts
+        effects.append(
+            {
+                "type": "WRITE_MAP_TEXTS",
+                "folder": state["folder"],
+                "texts": texts,
+            }
+        )
+        effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "MAP_TEXT_MOVED":
+        texts = deepcopy(state["model"]["map-texts"])
+        for item in texts:
+            if item["id"] == event["text-id"]:
+                item["x"] = event["x"]
+                item["y"] = event["y"]
+                break
+        state["model"]["map-texts"] = texts
+        effects.append(
+            {
+                "type": "WRITE_MAP_TEXTS",
+                "folder": state["folder"],
+                "texts": texts,
+            }
+        )
+        effects.append({"type": "PROJECT_MAP"})
+
     elif name == "SELECT_ENTRY":
         state["selected-entry"] = event["entry-name"]
+        state["selected-text"] = None
+        effects.append({"type": "PROJECT_MAP"})
+
+    elif name == "SELECT_MAP_TEXT":
+        state["selected-entry"] = None
+        state["selected-text"] = event["text-id"]
         effects.append({"type": "PROJECT_MAP"})
 
     elif name == "SET_STATUS":

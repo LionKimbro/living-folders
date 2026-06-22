@@ -111,6 +111,37 @@ class DiscreteEngineTests(unittest.TestCase):
             effects,
         )
 
+    def test_map_text_can_be_created_and_moved(self):
+        state = initial_state()
+        state["folder"] = "C:/map"
+        state["model"] = {"map-texts": []}
+        text_item = {
+            "id": "note-1",
+            "text": "hello",
+            "x": 10,
+            "y": 20,
+            "alignment": "left",
+            "font-size": "medium",
+            "color": "white",
+        }
+
+        state, effects = reduce(
+            state,
+            {"type": "UPSERT_MAP_TEXT", "text-item": text_item},
+        )
+
+        self.assertEqual([text_item], state["model"]["map-texts"])
+        self.assertEqual("WRITE_MAP_TEXTS", effects[0]["type"])
+
+        state, effects = reduce(
+            state,
+            {"type": "MAP_TEXT_MOVED", "text-id": "note-1", "x": 90, "y": 110},
+        )
+
+        self.assertEqual(90, state["model"]["map-texts"][0]["x"])
+        self.assertEqual(110, state["model"]["map-texts"][0]["y"])
+        self.assertEqual("WRITE_MAP_TEXTS", effects[0]["type"])
+
 
 if __name__ == "__main__":
     unittest.main()

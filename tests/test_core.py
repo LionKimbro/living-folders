@@ -10,6 +10,7 @@ from livingfolders.core import (
     save_code_trust,
     save_command_annotations,
     save_map_geometry,
+    save_map_texts,
     save_presentation,
     write_manifest_template,
 )
@@ -146,6 +147,28 @@ class FolderModelTests(unittest.TestCase):
 
             self.assertTrue(inspect_folder(trusted)["trust-runnable-code"])
             self.assertFalse(inspect_folder(untrusted)["trust-runnable-code"])
+
+    def test_directory_map_texts_are_normalized_and_persisted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            texts = [
+                {
+                    "id": "note-1",
+                    "text": "This is the north wall.",
+                    "x": 120,
+                    "y": 80,
+                    "alignment": "center",
+                    "font-size": "large",
+                    "color": "green",
+                }
+            ]
+
+            save_map_texts(folder, texts)
+            model = inspect_folder(folder)
+
+            self.assertEqual(texts, model["map-texts"])
+            raw = json.loads((folder / ".living-folder.json").read_text(encoding="utf-8"))
+            self.assertEqual(texts, raw["directory-map"]["texts"])
 
 
 if __name__ == "__main__":

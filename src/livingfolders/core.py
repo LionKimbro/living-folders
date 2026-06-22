@@ -57,6 +57,7 @@ def inspect_folder(path):
     buttons = normalize_buttons(raw)
     command_annotations = normalize_command_annotations(raw)
     geometry = normalize_map_geometry(raw)
+    map_texts = normalize_map_texts(raw)
 
     return {
         "folder": str(folder),
@@ -77,6 +78,7 @@ def inspect_folder(path):
             command_annotations,
         ),
         "map-geometry": geometry,
+        "map-texts": map_texts,
         "entries": entries,
     }
 
@@ -264,6 +266,43 @@ def normalize_map_geometry(raw):
     return geometry
 
 
+def normalize_map_texts(raw):
+    section = raw.get("directory-map", {})
+    if not isinstance(section, dict):
+        raise ValueError("manifest.directory-map must be an object.")
+    source = section.get("texts", [])
+    if not isinstance(source, list):
+        raise ValueError("manifest.directory-map.texts must be an array.")
+
+    texts = []
+    for number, value in enumerate(source, 1):
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"manifest.directory-map.texts item {number} must be an object."
+            )
+        alignment = str(value.get("alignment", "left")).lower()
+        size = str(value.get("font-size", "medium")).lower()
+        color = str(value.get("color", "white")).lower()
+        if alignment not in {"left", "center", "right"}:
+            alignment = "left"
+        if size not in {"small", "medium", "large"}:
+            size = "medium"
+        if color not in {"white", "green", "blue", "red"}:
+            color = "white"
+        texts.append(
+            {
+                "id": str(value.get("id", uuid.uuid4())),
+                "text": str(value.get("text", "")),
+                "x": int(value.get("x", 40)),
+                "y": int(value.get("y", 40)),
+                "alignment": alignment,
+                "font-size": size,
+                "color": color,
+            }
+        )
+    return texts
+
+
 def detect_runnable_buttons(folder, entries, annotations):
     buttons = []
     for entry in entries:
@@ -362,6 +401,14 @@ def save_map_geometry(folder, geometry):
     return write_manifest(folder, raw)
 
 
+def save_map_texts(folder, texts):
+    _path, raw = read_manifest(normalize_folder_path(folder))
+    section = raw.setdefault("directory-map", {})
+    section["texts"] = texts
+    ensure_manifest_identity(raw, folder)
+    return write_manifest(folder, raw)
+
+
 def delete_immediate_file(folder, path):
     """Delete one immediate regular file after the GUI has confirmed intent."""
     folder = normalize_folder_path(folder)
@@ -385,7 +432,7 @@ def write_manifest_template(path):
     raw["role"] = inferred
     raw["purpose"] = infer_purpose(inferred)
     raw["buttons"] = []
-    raw["directory-map"] = {"items": {}}
+    raw["directory-map"] = {"items": {}, "texts": []}
     return write_manifest(folder, raw)
 
 

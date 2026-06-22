@@ -7,6 +7,7 @@ import queue
 import subprocess
 import threading
 import tkinter as tk
+import uuid
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -19,6 +20,7 @@ from .core import (
     save_code_trust,
     save_command_annotations,
     save_map_geometry,
+    save_map_texts,
     save_presentation,
 )
 from .discrete import initial_state, reduce
@@ -66,6 +68,8 @@ g = {
     "map-items": {},
     "map-item-entry": {},
     "map-handles": set(),
+    "map-text-items": {},
+    "map-item-text-id": {},
     "interaction": None,
 }
 
@@ -302,6 +306,8 @@ def route_effect(effect):
         delete_file_effect(effect)
     elif name == "WRITE_MAP_GEOMETRY":
         save_map_geometry(effect["folder"], effect["geometry"])
+    elif name == "WRITE_MAP_TEXTS":
+        save_map_texts(effect["folder"], effect["texts"])
     elif name == "PROJECT":
         project_everything()
     elif name == "PROJECT_ACTIONS":
@@ -380,6 +386,8 @@ def replace_body():
     g["map-items"].clear()
     g["map-item-entry"].clear()
     g["map-handles"].clear()
+    g["map-text-items"].clear()
+    g["map-item-text-id"].clear()
 
     model = g["state"]["model"]
     if model["active-presentation"] == "directory-map":
@@ -517,6 +525,8 @@ def project_map():
     g["map-items"].clear()
     g["map-item-entry"].clear()
     g["map-handles"].clear()
+    g["map-text-items"].clear()
+    g["map-item-text-id"].clear()
     model = g["state"]["model"]
 
     for number, entry in enumerate(model["entries"]):
@@ -525,6 +535,8 @@ def project_map():
             default_geometry(number),
         )
         draw_map_entry(canvas, entry, geometry)
+    for text_item in model["map-texts"]:
+        draw_map_text(canvas, text_item)
 
 
 def draw_map_entry(canvas, entry, geometry):
@@ -570,6 +582,21 @@ def draw_map_entry(canvas, entry, geometry):
     g["map-handles"].add(handle)
 
 
+def draw_map_text(canvas, text_item):
+    item = canvas.create_text(
+        text_item["x"],
+        text_item["y"],
+        text=text_item["text"],
+        anchor="nw",
+        justify=text_item["alignment"],
+        width=420,
+        fill=map_text_color(text_item["color"]),
+        font=("Segoe UI", map_text_font_size(text_item["font-size"])),
+    )
+    g["map-text-items"][text_item["id"]] = item
+    g["map-item-text-id"][item] = text_item["id"]
+
+
 def default_geometry(number):
     column = number % 5
     row = number // 5
@@ -590,6 +617,23 @@ def handle_map_press(event):
         canvas.canvasx(event.x),
         canvas.canvasy(event.y),
     )
+    text_items = [item for item in reversed(items) if item in g["map-item-text-id"]]
+    if text_items:
+        item = text_items[0]
+        text_id = g["map-item-text-id"][item]
+        dispatch({"type": "SELECT_MAP_TEXT", "text-id": text_id})
+        item = g["map-text-items"][text_id]
+        x, y = canvas.coords(item)
+        g["interaction"] = {
+            "kind": "text",
+            "text-id": text_id,
+            "start-x": canvas.canvasx(event.x),
+            "start-y": canvas.canvasy(event.y),
+            "origin": {"x": int(x), "y": int(y)},
+            "preview": {"x": int(x), "y": int(y)},
+            "changed": False,
+        }
+        return
     known = [item for item in reversed(items) if item in g["map-item-entry"]]
     if not known:
         g["interaction"] = None
@@ -599,6 +643,7 @@ def handle_map_press(event):
     name = g["map-item-entry"][item]
     geometry = current_canvas_geometry(name)
     g["interaction"] = {
+        "kind": "entry",
         "entry-name": name,
         "mode": "resize" if item in g["map-handles"] else "move",
         "start-x": canvas.canvasx(event.x),
@@ -617,6 +662,20 @@ def handle_map_motion(event):
     dx = canvas.canvasx(event.x) - interaction["start-x"]
     dy = canvas.canvasy(event.y) - interaction["start-y"]
     origin = interaction["origin"]
+
+    if interaction["kind"] == "text":
+        preview = {
+            "x": max(0, int(origin["x"] + dx)),
+            "y": max(0, int(origin["y"] + dy)),
+        }
+        interaction["preview"] = preview
+        interaction["changed"] = True
+        canvas.coords(
+            g["map-text-items"][interaction["text-id"]],
+            preview["x"],
+            preview["y"],
+        )
+        return
 
     if interaction["mode"] == "move":
         preview = {
@@ -640,6 +699,17 @@ def handle_map_release(_event):
     g["interaction"] = None
     if not interaction:
         return
+    if interaction["kind"] == "text":
+        if interaction["changed"]:
+            dispatch(
+                {
+                    "type": "MAP_TEXT_MOVED",
+                    "text-id": interaction["text-id"],
+                    "x": interaction["preview"]["x"],
+                    "y": interaction["preview"]["y"],
+                }
+            )
+        return
     if interaction["changed"]:
         dispatch(
             {
@@ -659,16 +729,165 @@ def handle_map_release(_event):
 
 def handle_map_double_click(event):
     canvas = g["widgets"]["map"]
+    x = int(canvas.canvasx(event.x))
+    y = int(canvas.canvasy(event.y))
     items = canvas.find_overlapping(
-        canvas.canvasx(event.x),
-        canvas.canvasy(event.y),
-        canvas.canvasx(event.x),
-        canvas.canvasy(event.y),
+        x,
+        y,
+        x,
+        y,
     )
     for item in reversed(items):
+        if item in g["map-item-text-id"]:
+            text_item = find_map_text(g["map-item-text-id"][item])
+            edited = edit_map_text_dialog(text_item)
+            if edited:
+                dispatch({"type": "UPSERT_MAP_TEXT", "text-item": edited})
+            return
         if item in g["map-item-entry"]:
             open_entry_by_name(g["map-item-entry"][item])
             return
+    created = edit_map_text_dialog(
+        {
+            "id": str(uuid.uuid4()),
+            "text": "",
+            "x": x,
+            "y": y,
+            "alignment": "left",
+            "font-size": "medium",
+            "color": "white",
+        }
+    )
+    if created and created["text"].strip():
+        dispatch({"type": "UPSERT_MAP_TEXT", "text-item": created})
+
+
+def edit_map_text_dialog(text_item):
+    """Collect annotation text and presentation choices in a modal editor."""
+    result = {"value": None}
+    window = tk.Toplevel(g["tk"])
+    window.title("Map Text")
+    window.geometry("620x430")
+    window.transient(g["tk"])
+    window.grab_set()
+    window.columnconfigure(0, weight=1)
+    window.rowconfigure(1, weight=1)
+
+    ttk.Label(window, text="Text to place on the directory map:").grid(
+        row=0,
+        column=0,
+        sticky="w",
+        padx=14,
+        pady=(14, 6),
+    )
+    editor = tk.Text(
+        window,
+        wrap="word",
+        height=12,
+        font=("Segoe UI", 11),
+        undo=True,
+    )
+    editor.grid(row=1, column=0, sticky="nsew", padx=14)
+    editor.insert("1.0", text_item["text"])
+
+    choices = ttk.Frame(window, padding=(14, 12))
+    choices.grid(row=2, column=0, sticky="ew")
+    choices.columnconfigure(0, weight=1)
+    choices.columnconfigure(1, weight=1)
+    choices.columnconfigure(2, weight=1)
+
+    alignment = tk.StringVar(value=text_item["alignment"])
+    size = tk.StringVar(value=text_item["font-size"])
+    color = tk.StringVar(value=text_item["color"])
+
+    add_radio_group(
+        choices,
+        0,
+        "Alignment",
+        alignment,
+        [("Left", "left"), ("Center", "center"), ("Right", "right")],
+    )
+    add_radio_group(
+        choices,
+        1,
+        "Font size",
+        size,
+        [("Small", "small"), ("Medium", "medium"), ("Large", "large")],
+    )
+    add_radio_group(
+        choices,
+        2,
+        "Color",
+        color,
+        [("White", "white"), ("Green", "green"), ("Blue", "blue"), ("Red", "red")],
+    )
+
+    buttons = ttk.Frame(window, padding=(14, 0, 14, 14))
+    buttons.grid(row=3, column=0, sticky="e")
+
+    def accept():
+        updated = dict(text_item)
+        updated["text"] = editor.get("1.0", "end-1c")
+        updated["alignment"] = alignment.get()
+        updated["font-size"] = size.get()
+        updated["color"] = color.get()
+        result["value"] = updated
+        window.destroy()
+
+    ttk.Button(
+        buttons,
+        text="Cancel",
+        command=window.destroy,
+        style="Living.TButton",
+    ).grid(row=0, column=0, padx=(0, 8))
+    ttk.Button(
+        buttons,
+        text="Save",
+        command=accept,
+        style="Living.TButton",
+    ).grid(row=0, column=1)
+
+    window.bind("<Escape>", lambda _event: window.destroy())
+    window.protocol("WM_DELETE_WINDOW", window.destroy)
+    editor.focus_set()
+    window.wait_window()
+    return result["value"]
+
+
+def add_radio_group(parent, column, title, variable, choices):
+    frame = ttk.LabelFrame(parent, text=title, padding=8)
+    frame.grid(row=0, column=column, sticky="nsew", padx=(0, 8))
+    for row, (label, value) in enumerate(choices):
+        ttk.Radiobutton(
+            frame,
+            text=label,
+            value=value,
+            variable=variable,
+        ).grid(row=row, column=0, sticky="w")
+
+
+def find_map_text(text_id):
+    for item in g["state"]["model"]["map-texts"]:
+        if item["id"] == text_id:
+            return dict(item)
+    raise ValueError(f"Map text is no longer present: {text_id}")
+
+
+def map_text_font_size(value):
+    return {
+        "small": 8,
+        "medium": 12,
+        "large": 32,
+    }[value]
+
+
+def map_text_color(value):
+    return {
+        "white": "#f4f6f8",
+        "green": "#70d68a",
+        "blue": "#66a9ff",
+        "red": "#ff6f6f",
+    }[value]
 
 
 def handle_delete_key(_event=None):
