@@ -1,0 +1,49 @@
+{
+  "document": {
+    "document-id": "living-folders.conversations.v1",
+    "title": "Living Folders Development Conversations",
+    "tags": [
+      "living-folders",
+      "conversations",
+      "provenance",
+      "project-history"
+    ],
+    "purpose": "Point to the Spark and conversations in which Living Folders was conceived and developed.",
+    "type": {
+      "logical": {
+        "base": "file",
+        "format": "json",
+        "encoding": "utf-8"
+      },
+      "semantic": {
+        "base": "conversation-index"
+      }
+    },
+    "status": "active"
+  },
+  "conversations": [
+    {
+      "kind": "spark",
+      "id": "1001d3f6-9568-46d5-9e2b-0da57db13dea",
+      "role": "Initial Spark ID and conception of the project."
+    },
+    {
+      "kind": "chatgpt-conversation",
+      "url": "https://chatgpt.com/c/6a37b619-3d4c-83e8-84bc-0ca49cdb21ef",
+      "role": "Concept development with Wing-Cat.",
+      "notes": [
+        "Lion recalls discussing the concept on the phone before this conversation as well."
+      ]
+    },
+    {
+      "kind": "chatgpt-conversation",
+      "url": "https://chatgpt.com/c/6a38849d-29f4-83e8-8cd3-5c0292c33d6b",
+      "role": "Pinning Living Folders to the taskbar."
+    },
+    {
+      "kind": "chatgpt-conversation",
+      "url": "https://chatgpt.com/c/6a38aa6b-7734-83e8-85c8-e4afc03b9196",
+      "role": "Daystream view development."
+    }
+  ]
+}
