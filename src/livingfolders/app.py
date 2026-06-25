@@ -1419,11 +1419,12 @@ def build_directory_map(parent):
     canvas.bind("<B1-Motion>", handle_map_motion)
     canvas.bind("<ButtonRelease-1>", handle_map_release)
     canvas.bind("<Double-Button-1>", handle_map_double_click)
+    canvas.bind("<Button-3>", handle_map_context_menu)
     canvas.bind("<Delete>", handle_delete_key)
     canvas.bind("<Prior>", handle_page_up)
     canvas.bind("<Next>", handle_page_down)
-    canvas.bind("<Control-v>", handle_paste_image)
-    canvas.bind("<Control-V>", handle_paste_image)
+    canvas.bind("<Control-v>", handle_map_paste)
+    canvas.bind("<Control-V>", handle_map_paste)
     canvas.bind("<Motion>", handle_map_placement_motion)
     canvas.bind("<Leave>", clear_placement_preview)
     canvas.bind("<Escape>", handle_cancel_map_placement)
@@ -1619,6 +1620,7 @@ def handle_incoming_context_menu(event):
             label="Open Shell Here",
             command=lambda: open_shell_at(entry["path"]),
         )
+    add_entry_file_actions(menu, entry)
     menu.add_separator()
     menu.add_command(
         label="Ignore / Hide",
@@ -2409,6 +2411,81 @@ def handle_map_double_click(event):
         dispatch({"type": "UPSERT_MAP_TEXT", "text-item": created})
 
 
+def handle_map_context_menu(event):
+    canvas = g["widgets"]["map"]
+    x = int(canvas.canvasx(event.x))
+    y = int(canvas.canvasy(event.y))
+    items = canvas.find_overlapping(x, y, x, y)
+    _item, key = top_map_hit(items)
+    menu = tk.Menu(
+        g["tk"],
+        tearoff=False,
+        bg=COLORS["panel"],
+        fg=COLORS["text"],
+        activebackground="#375d78",
+        activeforeground=COLORS["text"],
+    )
+
+    if key and key.startswith("image:"):
+        image_id = key.split(":", 1)[1]
+        dispatch({"type": "SELECT_MAP_IMAGE", "image-id": image_id})
+        image_item = find_map_image(image_id)
+        menu.add_command(
+            label="Open source image",
+            command=lambda: open_os_path(
+                resolve_image_asset_path(g["state"]["folder"], image_item)
+            ),
+        )
+        menu.add_command(
+            label="Align to Aspect Ratio",
+            command=lambda: align_map_image_to_aspect_ratio(image_id),
+        )
+        menu.tk_popup(event.x_root, event.y_root)
+        return "break"
+
+    if not key:
+        dispatch({"type": "CLEAR_SELECTION"})
+        menu.add_command(
+            label="New Folder",
+            command=lambda: create_immediate_entry("folder"),
+        )
+        menu.add_command(
+            label="New Text File",
+            command=lambda: create_immediate_entry("text"),
+        )
+        menu.add_command(
+            label="New Batch File (.bat)",
+            command=lambda: create_immediate_entry("batch"),
+        )
+        menu.add_command(
+            label="New JSON File",
+            command=lambda: create_immediate_entry("json"),
+        )
+        menu.tk_popup(event.x_root, event.y_root)
+        return "break"
+
+    if key.startswith("entry:"):
+        name = key.split(":", 1)[1]
+        entry = find_map_entry(name)
+        dispatch({"type": "SELECT_ENTRY", "entry-name": name})
+        if entry.get("missing"):
+            return "break"
+        menu.add_command(
+            label="Open in System",
+            command=lambda: open_os_path(entry["path"]),
+        )
+        if entry["kind"] == "folder":
+            menu.add_command(
+                label="Open Shell Here",
+                command=lambda: open_shell_at(entry["path"]),
+            )
+        add_entry_file_actions(menu, entry)
+        menu.tk_popup(event.x_root, event.y_root)
+        return "break"
+
+    return None
+
+
 def handle_add_image():
     path = filedialog.askopenfilename(
         parent=g["tk"],
@@ -2424,6 +2501,39 @@ def handle_add_image():
     import_image_paths([path], 80, 80)
 
 
+def map_clipboard_text():
+    try:
+        text = g["tk"].clipboard_get()
+    except tk.TclError:
+        return None
+    if not isinstance(text, str):
+        return None
+    text = text.replace("\r\n", "\n")
+    return text if text.strip() else None
+
+
+def paste_map_text(text, x, y):
+    dispatch(
+        {
+            "type": "UPSERT_MAP_TEXT",
+            "text-item": {
+                "id": str(uuid.uuid4()),
+                "text": text,
+                "x": x,
+                "y": y,
+                "alignment": "left",
+                "font-size": "small",
+                "color": "white",
+                "labelled-region": False,
+                "region-line-width": "thick",
+                "width": 320,
+                "height": 120,
+            },
+        }
+    )
+    dispatch({"type": "SET_STATUS", "text": "Pasted text into the Directory Map."})
+
+
 def handle_image_drop(event):
     canvas = g["widgets"]["map"]
     x = int(canvas.canvasx(event.x_root - canvas.winfo_rootx()))
@@ -2433,10 +2543,12 @@ def handle_image_drop(event):
     return getattr(event, "action", "copy")
 
 
-def handle_paste_image(_event=None):
+def handle_paste_image(_event=None, x=None, y=None):
     canvas = g["widgets"]["map"]
-    x = int(canvas.canvasx(max(40, canvas.winfo_width() // 2)))
-    y = int(canvas.canvasy(max(40, canvas.winfo_height() // 2)))
+    if x is None:
+        x = int(canvas.canvasx(max(40, canvas.winfo_width() // 2)))
+    if y is None:
+        y = int(canvas.canvasy(max(40, canvas.winfo_height() // 2)))
     content = ImageGrab.grabclipboard()
     if isinstance(content, Image.Image):
         try:
@@ -2453,6 +2565,21 @@ def handle_paste_image(_event=None):
     return "break"
 
 
+def handle_map_paste(event=None):
+    canvas = g["widgets"]["map"]
+    if event and getattr(event, "widget", None) == canvas:
+        x = int(canvas.canvasx(event.x))
+        y = int(canvas.canvasy(event.y))
+    else:
+        x = int(canvas.canvasx(max(40, canvas.winfo_width() // 2)))
+        y = int(canvas.canvasy(max(40, canvas.winfo_height() // 2)))
+    text = map_clipboard_text()
+    if text is not None:
+        paste_map_text(text, x, y)
+        return "break"
+    return handle_paste_image(event, x=x, y=y)
+
+
 def handle_global_paste(event):
     focus = event.widget.focus_get()
     if focus and focus.winfo_class() in {"Entry", "TEntry", "Text", "TCombobox"}:
@@ -2461,7 +2588,218 @@ def handle_global_paste(event):
         return None
     if g["state"]["model"]["active-presentation"] != "directory-map":
         return None
-    return handle_paste_image(event)
+    return handle_map_paste(event)
+
+
+def normalize_immediate_child_name(name, suffix=""):
+    trimmed = name.strip()
+    if not trimmed:
+        raise ValueError("A name is required.")
+    if suffix and Path(trimmed).suffix == "":
+        trimmed += suffix
+    candidate = Path(trimmed)
+    if candidate.is_absolute() or len(candidate.parts) != 1 or candidate.name != trimmed:
+        raise ValueError("Use a simple name inside the open folder, not a path.")
+    if trimmed in {".", ".."}:
+        raise ValueError("That name is not allowed.")
+    return trimmed
+
+
+def create_immediate_entry(kind):
+    prompts = {
+        "folder": ("New folder", "Folder name:", "New Folder", ""),
+        "batch": ("New batch file", "Batch file name:", "script.bat", ".bat"),
+        "text": ("New text file", "Text file name:", "notes.txt", ".txt"),
+        "json": ("New JSON file", "JSON file name:", "data.json", ".json"),
+    }
+    title, prompt, initial, suffix = prompts[kind]
+    name = simpledialog.askstring(
+        title,
+        prompt,
+        initialvalue=initial,
+        parent=g["tk"],
+    )
+    if name is None:
+        return
+    try:
+        normalized = normalize_immediate_child_name(name, suffix)
+        target = Path(g["state"]["folder"]) / normalized
+        if kind == "folder":
+            target.mkdir()
+        elif kind == "text":
+            with target.open("x", encoding="utf-8", newline="\n"):
+                pass
+        elif kind == "batch":
+            with target.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write("@echo off\n")
+        else:
+            with target.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write("{}\n")
+    except (OSError, ValueError) as error:
+        dispatch({"type": "SET_STATUS", "text": str(error)})
+        return
+    dispatch({"type": "REFRESH"})
+    dispatch({"type": "SET_STATUS", "text": f"Created {target.name}."})
+
+
+def align_map_image_to_aspect_ratio(image_id):
+    image_item = find_map_image(image_id)
+    try:
+        with Image.open(resolve_image_asset_path(g["state"]["folder"], image_item)) as image:
+            source_width, source_height = image.size
+    except (OSError, ValueError) as error:
+        dispatch({"type": "SET_STATUS", "text": str(error)})
+        return
+    aspect = source_width / source_height
+    width = max(24, int(round(image_item["height"] * aspect)))
+    height = max(24, int(round(image_item["width"] / aspect)))
+    if abs(width - image_item["width"]) <= abs(height - image_item["height"]):
+        updated = {**image_item, "width": width}
+    else:
+        updated = {**image_item, "height": height}
+    dispatch({"type": "UPSERT_MAP_IMAGE", "image-item": updated})
+    dispatch({"type": "SET_STATUS", "text": "Aligned image to its aspect ratio."})
+
+
+def add_entry_file_actions(menu, entry):
+    if entry["kind"] != "file":
+        return
+    suffix = Path(entry["name"]).suffix.lower()
+    commands = []
+    if suffix in {".bat", ".cmd"}:
+        commands.append(("Run batch file", lambda: run_detached_entry(entry)))
+    elif suffix in {".exe", ".com"}:
+        commands.append(("Execute program", lambda: run_detached_entry(entry)))
+    if suffix in {".bat", ".cmd", ".txt"}:
+        commands.append(("Edit in window", lambda: open_file_editor_window(entry["path"])))
+    if suffix in {".bat", ".cmd", ".txt", ".json"}:
+        commands.append(("Edit with Notepad", lambda: launch_external_program(["notepad", entry["path"]], Path(entry["path"]).parent)))
+    if suffix == ".json":
+        commands.append(("Edit with JSONEdit", lambda: launch_external_program(["jsonedit", entry["path"]], Path(entry["path"]).parent)))
+    if not commands:
+        return
+    menu.add_separator()
+    for label, command in commands:
+        menu.add_command(label=label, command=command)
+
+
+def run_detached_entry(entry):
+    path = Path(entry["path"])
+    suffix = path.suffix.lower()
+    if suffix in {".bat", ".cmd"}:
+        launch_external_program(
+            ["cmd", "/c", str(path)],
+            path.parent,
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        )
+        return
+    if suffix in {".exe", ".com"}:
+        launch_external_program(
+            [str(path)],
+            path.parent,
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        )
+
+
+def launch_external_program(command, cwd, creationflags=0):
+    try:
+        subprocess.Popen(
+            command,
+            cwd=cwd,
+            creationflags=creationflags,
+        )
+    except OSError as error:
+        dispatch({"type": "SET_STATUS", "text": str(error)})
+
+
+def read_text_for_editor(path):
+    raw = Path(path).read_bytes()
+    newline = "\r\n" if b"\r\n" in raw else "\n"
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding), encoding, newline
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1"), "latin-1", newline
+
+
+def open_file_editor_window(path):
+    try:
+        body, encoding, newline = read_text_for_editor(path)
+    except OSError as error:
+        dispatch({"type": "SET_STATUS", "text": str(error)})
+        return
+
+    window = tk.Toplevel(g["tk"])
+    window.title(f"Edit · {Path(path).name}")
+    window.geometry("900x620")
+    window.transient(g["tk"])
+    window.configure(bg=COLORS["background"])
+    window.columnconfigure(0, weight=1)
+    window.rowconfigure(1, weight=1)
+
+    tk.Label(
+        window,
+        text=Path(path).name,
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+        font=("Segoe UI Semibold", 16),
+        anchor="w",
+    ).grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
+
+    frame = tk.Frame(window, bg=COLORS["panel"])
+    frame.grid(row=1, column=0, sticky="nsew", padx=16)
+    frame.columnconfigure(0, weight=1)
+    frame.rowconfigure(0, weight=1)
+
+    editor = tk.Text(
+        frame,
+        wrap="none",
+        undo=True,
+        bg=COLORS["panel"],
+        fg=COLORS["text"],
+        insertbackground=COLORS["text"],
+        selectbackground="#375d78",
+        selectforeground=COLORS["text"],
+        relief="flat",
+        font=("Consolas", 10),
+    )
+    editor.grid(row=0, column=0, sticky="nsew")
+    editor.insert("1.0", body)
+
+    y_scroll = ttk.Scrollbar(frame, orient="vertical", command=editor.yview)
+    y_scroll.grid(row=0, column=1, sticky="ns")
+    x_scroll = ttk.Scrollbar(frame, orient="horizontal", command=editor.xview)
+    x_scroll.grid(row=1, column=0, sticky="ew")
+    editor.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+
+    footer = tk.Frame(window, bg=COLORS["background"], padx=16, pady=12)
+    footer.grid(row=2, column=0, sticky="e")
+
+    def save_file():
+        try:
+            content = editor.get("1.0", "end-1c")
+            serialized = content.replace("\n", newline)
+            with Path(path).open("w", encoding=encoding, newline="") as handle:
+                handle.write(serialized)
+        except OSError as error:
+            dispatch({"type": "SET_STATUS", "text": str(error)})
+            return
+        dispatch({"type": "REFRESH"})
+        dispatch({"type": "SET_STATUS", "text": f"Saved {Path(path).name}."})
+
+    ttk.Button(
+        footer,
+        text="Save",
+        command=save_file,
+        style="Living.TButton",
+    ).grid(row=0, column=0, padx=(0, 8))
+    ttk.Button(
+        footer,
+        text="Close",
+        command=window.destroy,
+        style="Living.TButton",
+    ).grid(row=0, column=1)
 
 
 def import_image_paths(paths, x, y):
@@ -3336,12 +3674,62 @@ def poll_runtime_inbox():
         g["tk"].after(1000, poll_runtime_inbox)
 
 
-def show_command_output():
-    messagebox.showinfo(
-        "Command output",
-        g["widgets"]["command-output"],
-        parent=g["tk"],
+def open_text_output_window(title, body):
+    window = tk.Toplevel(g["tk"])
+    window.title(title)
+    window.geometry("860x520")
+    window.transient(g["tk"])
+    window.configure(bg=COLORS["background"])
+    window.columnconfigure(0, weight=1)
+    window.rowconfigure(1, weight=1)
+
+    tk.Label(
+        window,
+        text=title,
+        bg=COLORS["background"],
+        fg=COLORS["text"],
+        font=("Segoe UI Semibold", 16),
+        anchor="w",
+    ).grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
+
+    frame = tk.Frame(window, bg=COLORS["panel"])
+    frame.grid(row=1, column=0, sticky="nsew", padx=16)
+    frame.columnconfigure(0, weight=1)
+    frame.rowconfigure(0, weight=1)
+
+    text = tk.Text(
+        frame,
+        wrap="none",
+        bg=COLORS["panel"],
+        fg=COLORS["text"],
+        insertbackground=COLORS["text"],
+        selectbackground="#375d78",
+        selectforeground=COLORS["text"],
+        relief="flat",
+        font=("Consolas", 10),
     )
+    text.grid(row=0, column=0, sticky="nsew")
+    text.insert("1.0", body)
+    text.configure(state="disabled")
+
+    y_scroll = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+    y_scroll.grid(row=0, column=1, sticky="ns")
+    x_scroll = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+    x_scroll.grid(row=1, column=0, sticky="ew")
+    text.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+
+    footer = tk.Frame(window, bg=COLORS["background"], padx=16, pady=12)
+    footer.grid(row=2, column=0, sticky="e")
+    ttk.Button(
+        footer,
+        text="Close",
+        command=window.destroy,
+        style="Living.TButton",
+    ).grid(row=0, column=0)
+
+
+def show_command_output():
+    open_text_output_window("Command output", g["widgets"]["command-output"])
 
 
 def project_status():

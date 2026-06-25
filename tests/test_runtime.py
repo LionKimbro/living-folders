@@ -1,7 +1,6 @@
 import json
 import tempfile
 import unittest
-import uuid
 from pathlib import Path
 from unittest import mock
 
@@ -35,13 +34,11 @@ class RuntimeTests(unittest.TestCase):
                 runtime.launcher_main([])
             launch.assert_called_once_with(Path("C:/here"))
 
-    def test_mutex_lock_and_summons_channel(self):
+    def test_lock_file_and_summons_channel(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
-            mutex_name = f"Local\\LivingFoldersTest_{uuid.uuid4()}"
             with (
                 mock.patch.object(runtime, "resolve_runtime_home", return_value=home),
-                mock.patch.object(runtime, "MUTEX_NAME", mutex_name),
             ):
                 first = runtime.acquire_instance()
                 second = runtime.acquire_instance()
@@ -49,9 +46,9 @@ class RuntimeTests(unittest.TestCase):
                 self.assertIsNone(second)
 
                 lock = runtime.read_lock()
-                self.assertEqual(first["id"], lock["id"])
+                self.assertEqual(first["lock_id"], lock["lock_id"])
                 self.assertEqual(first["pid"], lock["pid"])
-                self.assertTrue(runtime.named_mutex_exists())
+                self.assertEqual("open", lock["command"])
 
                 path = runtime.send_summons("C:/")
                 self.assertTrue(path.exists())
@@ -60,26 +57,21 @@ class RuntimeTests(unittest.TestCase):
                 self.assertFalse(path.exists())
 
                 runtime.release_instance(first)
-                self.assertFalse((home / runtime.LOCK_NAME).exists())
+                self.assertFalse((home / runtime.CLI_PROJECT_DIR_NAME / runtime.LOCK_NAME).exists())
 
     def test_release_does_not_remove_another_instances_lock(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
-            home.mkdir(exist_ok=True)
-            path = home / runtime.LOCK_NAME
-            path.write_text(json.dumps({"id": "someone-else"}), encoding="utf-8")
-            fake_handle = None
+            path = home / runtime.CLI_PROJECT_DIR_NAME / runtime.LOCK_NAME
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"lock_id": "someone-else"}), encoding="utf-8")
             instance = {
-                "id": "mine",
-                "runtime-home": str(home),
-                "mutex-handle": fake_handle,
+                "lock_id": "mine",
+                "lock-path": str(path),
             }
 
-            with mock.patch("ctypes.WinDLL") as windll:
-                runtime.release_instance(instance)
-
+            runtime.release_instance(instance)
             self.assertTrue(path.exists())
-            windll.return_value.CloseHandle.assert_called_once_with(fake_handle)
 
 
 if __name__ == "__main__":

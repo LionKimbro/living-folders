@@ -1,14 +1,12 @@
-"""Machine-wide single-instance runtime and FileTalk summons channel."""
+"""Single-instance runtime and FileTalk summons channel on lionscliapp lock.json."""
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import subprocess
 import sys
 import uuid
-from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,14 +15,11 @@ import machineroot
 
 MACHINE_ROOT_KEY = "living-folders-runtime"
 LAUNCHER_DIR_KEY = "path-dir"
-MUTEX_NAME = "Local\\LionKimbro_LivingFolders_SingleInstance_v1"
 WINDOW_TOKEN = "LIVING_FOLDERS_MAIN_WINDOW_99A72E"
-LOCK_NAME = "lock-file.json"
+CLI_PROJECT_DIR_NAME = ".living-folders-cli"
+LOCK_NAME = "lock.json"
 LAUNCHER_NAME = "living-folders.pyw"
 
-ERROR_ALREADY_EXISTS = 183
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-SYNCHRONIZE = 0x00100000
 SW_RESTORE = 9
 
 
@@ -35,7 +30,8 @@ def resolve_runtime_home(create=False):
     except machineroot.MachineRootError as error:
         raise RuntimeError(
             f'Machine Root key "{MACHINE_ROOT_KEY}" is required. '
-            "Define it as the directory that should hold lock-file.json and inbox/."
+            "Define it as the directory that should hold "
+            f"{CLI_PROJECT_DIR_NAME}/{LOCK_NAME} and inbox/."
         ) from error
 
     home = Path(value).expanduser().resolve()
@@ -43,6 +39,17 @@ def resolve_runtime_home(create=False):
         home.mkdir(parents=True, exist_ok=True)
         (home / "inbox").mkdir(parents=True, exist_ok=True)
     return home
+
+
+def resolve_cli_project_dir(create=False):
+    directory = resolve_runtime_home(create=create) / CLI_PROJECT_DIR_NAME
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def resolve_lock_path(create=False):
+    return resolve_cli_project_dir(create=create) / LOCK_NAME
 
 
 def resolve_launcher_dir(create=False):
@@ -81,30 +88,26 @@ def install_launcher():
 
 
 def acquire_instance():
-    """Acquire the hard Windows mutex and publish a human-readable lock record."""
-    home = resolve_runtime_home(create=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
-    kernel32.CreateMutexW.restype = wintypes.HANDLE
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
-    if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
-    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
-        kernel32.CloseHandle(handle)
-        return None
-
+    """Acquire lionscliapp-style lock.json and attach Living Folders metadata."""
+    path = resolve_lock_path(create=True)
     instance = {
-        "id": str(uuid.uuid4()),
+        "lock_id": str(uuid.uuid4()),
+        "command": "open",
         "pid": os.getpid(),
-        "started": now_iso(),
-        "runtime-home": str(home),
-        "mutex-handle": handle,
+        "created_at": now_iso(),
         "window-handle": None,
         "current-folder": None,
     }
-    write_lock(instance)
+    try:
+        with path.open("x", encoding="utf-8", newline="\n") as handle:
+            json.dump(instance, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError:
+        return None
+
+    instance["lock-path"] = str(path)
     return instance
 
 
@@ -119,38 +122,32 @@ def publish_current_folder(instance, folder):
 
 
 def release_instance(instance):
-    """Remove only this instance's lock record and release its mutex handle."""
+    """Remove only this execution's framework-style lock record."""
     if not instance:
         return
-    home = Path(instance["runtime-home"])
-    path = home / LOCK_NAME
+    path = Path(instance["lock-path"])
     current = read_json_object(path)
-    if current.get("id") == instance["id"]:
+    if current.get("lock_id") == instance["lock_id"]:
         try:
             path.unlink()
         except FileNotFoundError:
             pass
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    kernel32.CloseHandle(instance["mutex-handle"])
 
 
 def write_lock(instance):
     data = {
-        "living-folders-lock": "1",
-        "id": instance["id"],
+        "lock_id": instance["lock_id"],
+        "command": instance["command"],
         "pid": instance["pid"],
-        "started": instance["started"],
+        "created_at": instance["created_at"],
         "window-handle": instance["window-handle"],
         "current-folder": instance["current-folder"],
-        "mutex-name": MUTEX_NAME,
     }
-    atomic_write_json(Path(instance["runtime-home"]) / LOCK_NAME, data)
+    atomic_write_json(Path(instance["lock-path"]), data)
 
 
 def read_lock():
-    return read_json_object(resolve_runtime_home(create=True) / LOCK_NAME)
+    return read_json_object(resolve_lock_path(create=True))
 
 
 def instance_appears_alive():
@@ -159,7 +156,6 @@ def instance_appears_alive():
     return (
         isinstance(pid, int)
         and is_process_alive(pid)
-        and named_mutex_exists()
     )
 
 
@@ -214,6 +210,9 @@ def bring_window_to_front(root):
 
 def bring_hwnd_to_front(hwnd):
     """Foreground a known window handle from the user-invoked launcher."""
+    import ctypes
+    from ctypes import wintypes
+
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.ShowWindow(wintypes.HWND(hwnd), SW_RESTORE)
     user32.SetForegroundWindow(wintypes.HWND(hwnd))
@@ -258,7 +257,7 @@ def launcher_main(argv=None):
 
 
 def remove_stale_lock():
-    path = resolve_runtime_home(create=True) / LOCK_NAME
+    path = resolve_lock_path(create=True)
     lock = read_json_object(path)
     pid = lock.get("pid")
     if not isinstance(pid, int) or not is_process_alive(pid):
@@ -269,6 +268,10 @@ def remove_stale_lock():
 
 
 def is_process_alive(pid):
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     if pid <= 0:
         return False
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -277,19 +280,6 @@ def is_process_alive(pid):
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    kernel32.CloseHandle(handle)
-    return True
-
-
-def named_mutex_exists():
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenMutexW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
-    kernel32.OpenMutexW.restype = wintypes.HANDLE
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenMutexW(SYNCHRONIZE, False, MUTEX_NAME)
     if not handle:
         return False
     kernel32.CloseHandle(handle)

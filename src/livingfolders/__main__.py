@@ -9,6 +9,7 @@ import lionscliapp as app
 from . import __version__
 from .core import inspect_folder, write_manifest_template
 from .runtime import (
+    CLI_PROJECT_DIR_NAME,
     LAUNCHER_DIR_KEY,
     MACHINE_ROOT_KEY,
     install_launcher,
@@ -29,7 +30,7 @@ def main():
         f'  Required key: "{MACHINE_ROOT_KEY}"\n'
         "  Value: a machine-local runtime directory, conventionally "
         "C:\\lion\\installed\\living-folders\n"
-        "  The directory owns lock-file.json and inbox/.\n"
+        f"  The directory owns {CLI_PROJECT_DIR_NAME}/lock.json and inbox/.\n"
         f'  Required launcher key: "{LAUNCHER_DIR_KEY}"\n'
         "  Value: a directory on PATH where living-folders.pyw is installed.\n"
         "  Launcher usage: living-folders.pyw [folder]\n"
@@ -37,7 +38,8 @@ def main():
         "single-instance identity does not depend on the lionscliapp project folder.",
         "l",
     )
-    app.declare_projectdir(".living-folders-cli")
+    app.declare_projectdir(CLI_PROJECT_DIR_NAME)
+    app.set_flag("uses_locking", True)
     app.declare_key("execpath.folder", str(invocation_folder))
     app.describe_key("execpath.folder", "Folder to open, inspect, or initialize.")
 
