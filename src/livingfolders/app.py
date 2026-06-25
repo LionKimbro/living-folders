@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+import lionscliapp as cliapp
 from PIL import Image, ImageGrab, ImageTk
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
@@ -37,7 +38,6 @@ from .core import (
     save_presentation,
 )
 from .discrete import initial_state, reduce
-from . import runtime
 
 
 COLORS = {
@@ -55,6 +55,8 @@ COLORS = {
     "image": "#9c6ac4",
     "file": "#727d86",
 }
+
+WINDOW_TOKEN = "LIVING_FOLDERS_MAIN_WINDOW_99A72E"
 
 MODE_LABELS = {
     "temporal": "Temporal · Daystream",
@@ -99,36 +101,28 @@ g = {
     "temporal-selected": None,
     "temporal-cell-items": {},
     "temporal-row-by-date": {},
-    "instance": None,
 }
 
 
 def run(path):
     """Create the two-thread Tkinter application and open the requested folder."""
-    instance = runtime.acquire_instance()
-    if instance is None:
-        runtime.send_summons(path)
-        return
-
-    g["instance"] = instance
     try:
         build_window()
-        runtime.publish_window_handle(instance, g["tk"].winfo_id())
+        cliapp.attach_tk(g["tk"], handle_runtime_message)
+        cliapp.publish_instance_metadata({"window_handle": int(g["tk"].winfo_id())})
         start_worker()
         dispatch({"type": "NAVIGATE", "path": str(path), "remember": False})
         poll_worker_results()
-        poll_runtime_inbox()
         g["tk"].deiconify()
         g["tk"].mainloop()
     finally:
-        runtime.release_instance(instance)
-        g["instance"] = None
+        cliapp.detach_tk()
 
 
 def build_window():
     root = TkinterDnD.Tk()
     root.withdraw()
-    root.title(f"Living Folders  [{runtime.WINDOW_TOKEN}]")
+    root.title(f"Living Folders  [{WINDOW_TOKEN}]")
     root.geometry("1240x820")
     root.minsize(860, 600)
     root.option_add("*tearOff", 0)
@@ -426,8 +420,7 @@ def project_everything():
     g["projecting"] = True
     model = g["state"]["model"]
     path = model["folder"]
-    if g["instance"]:
-        runtime.publish_current_folder(g["instance"], path)
+    cliapp.publish_instance_metadata({"current_folder": str(Path(path).resolve())})
     g["widgets"]["path-var"].set(path)
     g["widgets"]["back"].configure(
         state="normal" if g["state"]["back-stack"] else "disabled"
@@ -3646,32 +3639,40 @@ def poll_worker_results():
         g["tk"].after(100, poll_worker_results)
 
 
-def poll_runtime_inbox():
-    messages = runtime.consume_summons()
-    if messages:
-        requested = [
-            message["requested-folder"]
-            for message in messages
-            if message.get("requested-folder")
-        ]
+def requested_folder_from_message(message):
+    overrides = message.get("cli-overrides")
+    if isinstance(overrides, dict):
+        requested = overrides.get("execpath.open-at")
         if requested:
-            dispatch(
-                {
-                    "type": "NAVIGATE",
-                    "path": requested[-1],
-                    "remember": True,
-                }
-            )
-        runtime.bring_window_to_front(g["tk"])
-        if not requested:
-            dispatch(
-                {
-                    "type": "SET_STATUS",
-                    "text": "Living Folders was summoned to the foreground.",
-                }
-            )
-    if not g["closing"]:
-        g["tk"].after(1000, poll_runtime_inbox)
+            return str(Path(requested).expanduser().resolve())
+
+    argv = message.get("argv")
+    if isinstance(argv, list):
+        for number, value in enumerate(argv):
+            if value == "--execpath.open-at" and number + 1 < len(argv):
+                return str(Path(argv[number + 1]).expanduser().resolve())
+    return None
+
+
+def handle_runtime_message(message):
+    if message.get("type") != "summon":
+        return
+    requested = requested_folder_from_message(message)
+    if requested:
+        dispatch(
+            {
+                "type": "NAVIGATE",
+                "path": requested,
+                "remember": True,
+            }
+        )
+        return
+    dispatch(
+        {
+            "type": "SET_STATUS",
+            "text": "Living Folders was summoned to the foreground.",
+        }
+    )
 
 
 def open_text_output_window(title, body):

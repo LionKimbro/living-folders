@@ -12,19 +12,19 @@ Legacy `.living-folder.json` files remain readable. New writes use the
 
 ```powershell
 python -m pip install -e .
-living-folders --execpath.folder .
+python -m livingfolders --execpath.open-at .
 ```
 
 Inspect the same canonical portrait without opening a window:
 
 ```powershell
-living-folders --execpath.folder . inspect
+python -m livingfolders --execpath.open-at . inspect
 ```
 
 Give an existing directory a starter constitution:
 
 ```powershell
-living-folders --execpath.folder C:\some\folder init
+python -m livingfolders --execpath.open-at C:\some\folder init
 ```
 
 The window provides editable path navigation, back/up/refresh controls,
@@ -46,35 +46,36 @@ filesystem entries; the calendar is only their interpretation.
 
 The fuller orientation and manifest SoftSpec live in `docs/raw/`.
 
-## Machine-wide runtime
+## Stable runtime root
 
-Machine Root must define:
+Living Folders now relies directly on `lionscliapp`'s Tk single-instance
+runtime. To make that machine-stable, launch it with an explicit `--execroot`.
+The package no longer installs a bare `living-folders.exe` script; the intended
+Windows entry path is through the launcher batch files or `python -m`.
+
+The included Windows launchers in [launchers](C:/lion/github/living-folders/launchers)
+assume:
 
 ```text
-living-folders-runtime = C:\lion\installed\living-folders
-path-dir = C:\bin
+C:\lion\runtime\living-folders
 ```
 
-This directory owns the single-instance `lock-file.json`, FileTalk-style
-`inbox/`, and the isolated lionscliapp configuration directory. The launcher
-is installed into `path-dir` by:
+as the stable runtime root.
+
+The GUI launcher:
 
 ```powershell
-living-folders install-launcher
+launchers\living-folders.bat "C:\lion\github"
 ```
 
-Invoking `living-folders.pyw` starts Living Folders or summons the existing
-window.
-
-An optional folder redirects the resident window:
+translates to:
 
 ```powershell
-living-folders.pyw "C:\lion\github"
+pythonw -m livingfolders --execroot C:\lion\runtime\living-folders --execpath.open-at "C:\lion\github"
 ```
 
-The development installation currently uses:
+The debug launcher uses `python` instead of `pythonw`:
 
 ```powershell
-python -m pip install -e C:\lion\github\living-folders
-living-folders install-launcher
+launchers\living-folders-debug.bat "C:\lion\github"
 ```

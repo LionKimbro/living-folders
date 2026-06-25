@@ -14,13 +14,9 @@ authors = [
 ]
 dependencies = [
   "lionscliapp>=0.1.2",
-  "machine-root",
   "Pillow>=10",
   "tkinterdnd2>=0.4",
 ]
-
-[project.scripts]
-living-folders = "livingfolders.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

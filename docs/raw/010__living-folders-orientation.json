@@ -106,28 +106,27 @@
     ]
   },
   "architecture": {
-    "cli": "lionscliapp owns declaration, dispatch, persistent app configuration, and execpath.folder coercion.",
+    "cli": "lionscliapp owns declaration, dispatch, persistent app configuration, execpath.open-at coercion, and Tk single-instance runtime behavior.",
     "world-model": "The filesystem plus .living-folder/description.json and its content-addressed image tree own durable folder reality. Temporal nodes are derived projections over immediate entries.",
     "discrete-engine": "Semantic events reduce into compact navigation, trust, selection, and committed map state, producing explicit effects.",
     "continuity": "Tk pointer callbacks own in-progress map move and resize previews. Only release emits committed semantic meaning.",
     "projection": "Tk widgets and canvas items are downstream renderings and do not decide semantic truth.",
     "effects": "Folder reads, atomic JSON writes, process launches, and OS opening occur outside the reducer."
   },
-  "machine-runtime": {
-    "machine-root-key": "living-folders-runtime",
-    "configured-value": "C:\\lion\\installed\\living-folders",
-    "launcher-directory-key": "path-dir",
-    "launcher-directory-purpose": "A shared directory on PATH into which install-launcher writes living-folders.pyw.",
-    "lock": "A Windows named mutex is the hard single-instance lock. lock-file.json is the inspectable PID, instance, and window-handle record.",
-    "summons": "A launcher writes atomic summon messages into inbox/. The resident application polls once per second, foregrounds itself, and deletes handled messages.",
-    "launcher": "<path-dir>\\living-folders.pyw",
-    "launcher-install-command": "living-folders install-launcher",
-    "launcher-folder-argument": "living-folders.pyw [folder] starts in that folder or redirects the resident instance to it through the summons inbox.",
-    "lionscliapp": "The CLI remains built with lionscliapp, but its execution root is moved to the Machine Root runtime home before framework startup. The requested folder is captured as an absolute path first. Single-instance identity does not depend on the lionscliapp project directory."
+  "runtime-model": {
+    "stable-execroot": "Living Folders should be launched with an explicit stable --execroot such as C:\\lion\\runtime\\living-folders.",
+    "instance-owner": "lionscliapp's Tk runtime owns instance.json and inbox/ under the resolved .living-folders-cli project directory.",
+    "summons": "A second invocation of the single-instance Tk command writes a summon message into inbox/ and exits. The resident application polls through lionscliapp's Tk attachment and responds on the Tk event loop.",
+    "launchers": [
+      "launchers\\living-folders.bat uses pythonw and passes --execroot plus optional --execpath.open-at.",
+      "launchers\\living-folders-debug.bat uses python and passes the same arguments for console-visible debugging."
+    ],
+    "special-note": "Living Folders no longer depends on Machine Root or a custom auxiliary summon runtime to obtain machine-stable single-instance behavior.",
+    "packaging-note": "The package no longer installs a bare living-folders script entry. The expected launch paths are python -m livingfolders ... or the provided batch launchers."
   },
   "commands": {
-    "open": "living-folders --execpath.folder <folder>",
-    "inspect": "living-folders --execpath.folder <folder> inspect",
-    "initialize": "living-folders --execpath.folder <folder> init"
+    "open": "living-folders --execpath.open-at <folder>",
+    "inspect": "living-folders --execpath.open-at <folder> inspect",
+    "initialize": "living-folders --execpath.open-at <folder> init"
   }
 }
